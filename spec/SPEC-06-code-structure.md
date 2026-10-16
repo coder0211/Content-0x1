@@ -20,15 +20,15 @@
               Phụ thuộc chỉ được hướng VÀO TRONG
 ```
 
-| Quy tắc | Chi tiết |
-|---|---|
-| R1. Dependency rule | `domain` không import gì ngoài stdlib và `shared/kernel`. `usecase` chỉ import `domain` và port. `adapter` import `usecase`/`domain`. Chỉ `cmd/` (composition root) biết tất cả |
-| R2. Port do người dùng định nghĩa | Interface (repository, AI provider, storage, queue, clock) khai báo ở **usecase** (nơi dùng), adapter implement |
-| R3. Không lộ framework vào trong | Không có `pgx`, `http.Request`, `asynq`, struct JSON của vendor trong `domain`/`usecase` |
-| R4. Module giao tiếp qua API công khai | Module A chỉ gọi module B qua interface trong `B/usecase/api.go` (hoặc domain event), **không** import `B/adapter` hay bảng DB của B |
-| R5. Transaction thuộc use case | Use case mở transaction qua port `TxManager`; repository lấy tx từ `context` |
-| R6. DTO tách biệt | HTTP DTO ≠ use case input/output ≠ domain entity ≠ DB row. Mapping nằm ở adapter |
-| R7. Kiểm tra bằng công cụ | `depguard`/`go-arch-lint` (BE) và `eslint-plugin-boundaries` (FE) chạy trên CI; vi phạm thì build fail |
+| Quy tắc                                | Chi tiết                                                                                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1. Dependency rule                    | `domain` không import gì ngoài stdlib và `shared/kernel`. `usecase` chỉ import `domain` và port. `adapter` import `usecase`/`domain`. Chỉ `cmd/` (composition root) biết tất cả |
+| R2. Port do người dùng định nghĩa      | Interface (repository, AI provider, storage, queue, clock) khai báo ở **usecase** (nơi dùng), adapter implement                                                                 |
+| R3. Không lộ framework vào trong       | Không có `pgx`, `http.Request`, `asynq`, struct JSON của vendor trong `domain`/`usecase`                                                                                        |
+| R4. Module giao tiếp qua API công khai | Module A chỉ gọi module B qua interface trong `B/usecase/api.go` (hoặc domain event), **không** import `B/adapter` hay bảng DB của B                                            |
+| R5. Transaction thuộc use case         | Use case mở transaction qua port `TxManager`; repository lấy tx từ `context`                                                                                                    |
+| R6. DTO tách biệt                      | HTTP DTO ≠ use case input/output ≠ domain entity ≠ DB row. Mapping nằm ở adapter                                                                                                |
+| R7. Kiểm tra bằng công cụ              | `depguard`/`go-arch-lint` (BE) và `eslint-plugin-boundaries` (FE) chạy trên CI; vi phạm thì build fail                                                                          |
 
 ## 2. Backend (Go)
 
@@ -129,17 +129,18 @@ modules/content/
 
 Trách nhiệm từng layer:
 
-| Layer | Chứa | Không được chứa |
-|---|---|---|
-| `domain` | Entity, value object, state machine (VD `asset.Status.CanTransition`), rule nghiệp vụ thuần | I/O, context, SQL, JSON tag của API |
-| `usecase` | Interactor (1 file = 1 use case), port, input/output struct, kiểm tra quyền theo `Actor`, transaction | HTTP status, SQL, gọi SDK vendor |
-| `adapter/http` | Parse/validate request, map lỗi domain → HTTP (qua `httpx`), presenter | Logic nghiệp vụ, truy cập DB trực tiếp |
-| `adapter/worker` | Nhận step từ job engine, gọi use case | Logic retry (do module `job` lo) |
-| `adapter/postgres` | Implement repository port bằng sqlc, map row ↔ entity | Rule nghiệp vụ |
+| Layer              | Chứa                                                                                                  | Không được chứa                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `domain`           | Entity, value object, state machine (VD `asset.Status.CanTransition`), rule nghiệp vụ thuần           | I/O, context, SQL, JSON tag của API    |
+| `usecase`          | Interactor (1 file = 1 use case), port, input/output struct, kiểm tra quyền theo `Actor`, transaction | HTTP status, SQL, gọi SDK vendor       |
+| `adapter/http`     | Parse/validate request, map lỗi domain → HTTP (qua `httpx`), presenter                                | Logic nghiệp vụ, truy cập DB trực tiếp |
+| `adapter/worker`   | Nhận step từ job engine, gọi use case                                                                 | Logic retry (do module `job` lo)       |
+| `adapter/postgres` | Implement repository port bằng sqlc, map row ↔ entity                                                 | Rule nghiệp vụ                         |
 
 ### 2.3. Code mẫu
 
 **Domain** (`modules/asset/domain/asset.go`)
+
 ```go
 package domain
 
@@ -186,6 +187,7 @@ func (a *Asset) transition(to Status) error {
 ```
 
 **Port + use case** (`modules/asset/usecase/approve_asset.go`)
+
 ```go
 package usecase
 
@@ -232,6 +234,7 @@ func (uc ApproveAsset) Execute(ctx context.Context, actor kernel.Actor, in Appro
 ```
 
 **HTTP adapter** (`modules/asset/adapter/http/handler.go`)
+
 ```go
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
     var req approveRequest
@@ -252,6 +255,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 ```
 
 **Composition root** (`cmd/server/main.go`, trích)
+
 ```go
 db := postgres.MustConnect(cfg.DatabaseURL)
 tx := postgres.NewTxManager(db)
@@ -296,33 +300,33 @@ Luồng: `content/usecase.GenerateContent` → `budget.API.Reserve` → `job.API
 
 ### 2.5. Ranh giới module (ai được gọi ai)
 
-| Module | Được gọi API của |
-|---|---|
-| identity | — |
-| audit | — |
-| brand | audit |
-| campaign | brand, audit |
-| asset | audit (storage qua port) |
-| budget | audit |
-| job | — (chỉ phát event) |
-| provider | audit |
-| content | brand, campaign, asset, job, budget, provider |
-| image | brand, campaign, asset, job, budget, provider |
-| video | brand, campaign, asset, job, budget, provider, content (lấy script) |
-| dashboard | đọc read model (query riêng, chỉ đọc) |
+| Module    | Được gọi API của                                                    |
+| --------- | ------------------------------------------------------------------- |
+| identity  | —                                                                   |
+| audit     | —                                                                   |
+| brand     | audit                                                               |
+| campaign  | brand, audit                                                        |
+| asset     | audit (storage qua port)                                            |
+| budget    | audit                                                               |
+| job       | — (chỉ phát event)                                                  |
+| provider  | audit                                                               |
+| content   | brand, campaign, asset, job, budget, provider                       |
+| image     | brand, campaign, asset, job, budget, provider                       |
+| video     | brand, campaign, asset, job, budget, provider, content (lấy script) |
+| dashboard | đọc read model (query riêng, chỉ đọc)                               |
 
 Không được có vòng phụ thuộc. `job` và `budget` không biết đến `content/image/video`.
 
 ### 2.6. Kiểm thử theo layer
 
-| Layer | Loại test | Công cụ |
-|---|---|---|
-| domain | Unit thuần, table-driven (state machine, rule) | `testing` |
-| usecase | Unit với fake port (in-memory repo, fake AI, fake clock) | `testing`, fake trong `internal/testutil` |
-| adapter/postgres | Integration với Postgres thật | testcontainers-go |
-| adapter/http | Handler test với use case giả + test contract với OpenAPI | `httptest`, kin-openapi validator |
-| providers/* | Contract test (recorded) + `live` tag | go-vcr |
-| End-to-end | API + worker + fake provider | docker compose trong CI |
+| Layer            | Loại test                                                 | Công cụ                                   |
+| ---------------- | --------------------------------------------------------- | ----------------------------------------- |
+| domain           | Unit thuần, table-driven (state machine, rule)            | `testing`                                 |
+| usecase          | Unit với fake port (in-memory repo, fake AI, fake clock)  | `testing`, fake trong `internal/testutil` |
+| adapter/postgres | Integration với Postgres thật                             | testcontainers-go                         |
+| adapter/http     | Handler test với use case giả + test contract với OpenAPI | `httptest`, kin-openapi validator         |
+| providers/\*     | Contract test (recorded) + `live` tag                     | go-vcr                                    |
+| End-to-end       | API + worker + fake provider                              | docker compose trong CI                   |
 
 ### 2.7. Kiểm tra kiến trúc tự động
 
@@ -347,6 +351,7 @@ linters-settings:
           - pkg: "acs/internal/platform"
           - pkg: "acs/internal/providers"
 ```
+
 Bổ sung `go-arch-lint` để chặn import chéo `modules/<a>/adapter` từ `modules/<b>` (R4).
 
 ## 3. Frontend (React + TypeScript)
@@ -386,13 +391,13 @@ web/src/
 
 ### 3.2. Quy tắc layer FE
 
-| Layer | Chứa | Được import |
-|---|---|---|
-| `domain` | Type, rule thuần, không React | `shared/kernel` |
-| `application` | Hook use case (TanStack Query mutation/query), port `XRepository` | `domain`, `shared/kernel` |
-| `infrastructure` | `HttpContentRepository implements ContentRepository`, mapper | `domain`, `application` (port), `shared/api` |
-| `presentation` | Component, page; chỉ gọi hook của `application` | `application`, `domain`, `shared/ui`, `shared/lib` |
-| `app` | Router, provider, đăng ký repository vào DI context | mọi thứ |
+| Layer            | Chứa                                                              | Được import                                        |
+| ---------------- | ----------------------------------------------------------------- | -------------------------------------------------- |
+| `domain`         | Type, rule thuần, không React                                     | `shared/kernel`                                    |
+| `application`    | Hook use case (TanStack Query mutation/query), port `XRepository` | `domain`, `shared/kernel`                          |
+| `infrastructure` | `HttpContentRepository implements ContentRepository`, mapper      | `domain`, `application` (port), `shared/api`       |
+| `presentation`   | Component, page; chỉ gọi hook của `application`                   | `application`, `domain`, `shared/ui`, `shared/lib` |
+| `app`            | Router, provider, đăng ký repository vào DI context               | mọi thứ                                            |
 
 - Component **không** gọi `fetch`/`shared/api` trực tiếp.
 - Module khác chỉ import qua `modules/<x>/index.ts`.
@@ -409,7 +414,7 @@ export interface ContentRepository {
 
 // modules/content/application/useGenerateContent.ts
 export function useGenerateContent() {
-  const repo = useRepository('content');
+  const repo = useRepository("content");
   return useMutation({
     mutationFn: (input: GenerateContentInput) => repo.generate(input, crypto.randomUUID()),
   });
@@ -418,7 +423,7 @@ export function useGenerateContent() {
 // modules/content/infrastructure/HttpContentRepository.ts
 export class HttpContentRepository implements ContentRepository {
   async generate(input: GenerateContentInput, key: string) {
-    const res = await http.post('/content/generations', toGenerateDto(input), { idempotencyKey: key });
+    const res = await http.post("/content/generations", toGenerateDto(input), { idempotencyKey: key });
     return toJobAccepted(res);
   }
   // ...
@@ -461,23 +466,28 @@ rules: {
 
 ### 3.5. Kiểm thử FE
 
-| Layer | Test |
-|---|---|
-| domain | Vitest unit |
-| application | Vitest + fake repository |
-| infrastructure | Vitest + MSW (mock HTTP theo OpenAPI) |
-| presentation | Testing Library cho component có logic; ảnh chụp các trạng thái SPEC-05 §5 |
-| E2E | Playwright (ACS-105) |
+| Layer          | Test                                                                       |
+| -------------- | -------------------------------------------------------------------------- |
+| domain         | Vitest unit                                                                |
+| application    | Vitest + fake repository                                                   |
+| infrastructure | Vitest + MSW (mock HTTP theo OpenAPI)                                      |
+| presentation   | Testing Library cho component có logic; ảnh chụp các trạng thái SPEC-05 §5 |
+| E2E            | Playwright (ACS-105)                                                       |
 
 ## 4. Quy ước đặt tên
 
-| Thứ | BE (Go) | FE (TS) |
-|---|---|---|
-| Use case | `GenerateContent`, file `generate_content.go` | `useGenerateContent`, file `useGenerateContent.ts` |
-| Port | `AssetRepository`, `ports.TextGenerator` | `ContentRepository` |
-| Adapter impl | `postgres.AssetRepository`, `openai.TextAdapter` | `HttpContentRepository` |
-| DTO | `generateContentRequest` (unexported, trong adapter/http) | `GenerateContentDto` (trong infrastructure) |
-| Lỗi | `kernel.DomainError{Code: "BUDGET_EXCEEDED"}` | `ApiError.code === 'BUDGET_EXCEEDED'` |
+| Thứ          | BE (Go)                                                   | FE (TS)                                            |
+| ------------ | --------------------------------------------------------- | -------------------------------------------------- |
+| Use case     | `GenerateContent`, file `generate_content.go`             | `useGenerateContent`, file `useGenerateContent.ts` |
+| Port         | `AssetRepository`, `ports.TextGenerator`                  | `ContentRepository`                                |
+| Adapter impl | `postgres.AssetRepository`, `openai.TextAdapter`          | `HttpContentRepository`                            |
+| DTO          | `generateContentRequest` (unexported, trong adapter/http) | `GenerateContentDto` (trong infrastructure)        |
+| Lỗi          | `kernel.DomainError{Code: "BUDGET_EXCEEDED"}`             | `ApiError.code === 'BUDGET_EXCEEDED'`              |
+| Use case     | `GenerateContent`, file `generate_content.go`             | `useGenerateContent`, file `useGenerateContent.ts` |
+| Port         | `AssetRepository`, `ports.TextGenerator`                  | `ContentRepository`                                |
+| Adapter impl | `postgres.AssetRepository`, `openai.TextAdapter`          | `HttpContentRepository`                            |
+| DTO          | `generateContentRequest` (unexported, trong adapter/http) | `GenerateContentDto` (trong infrastructure)        |
+| Lỗi          | `kernel.DomainError{Code: "BUDGET_EXCEEDED"}`             | `ApiError.code === 'BUDGET_EXCEEDED'`              |
 
 ## 5. Checklist khi thêm một tính năng
 

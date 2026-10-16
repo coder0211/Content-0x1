@@ -1,6 +1,7 @@
 # SPEC-03 — Database Schema (PostgreSQL 16)
 
 Quy ước:
+
 - PK `UUID DEFAULT gen_random_uuid()`; thời gian `TIMESTAMPTZ`; dữ liệu provider/biến đổi dùng `JSONB`.
 - Bảng nghiệp vụ có `created_at`, `updated_at` (trigger `set_updated_at`), `created_by` FK → `users`.
 - Trạng thái dùng `TEXT + CHECK` (dễ migrate hơn ENUM).
@@ -40,6 +41,7 @@ erDiagram
 **Campaign**: `draft → in_progress → review → completed → archived` (cho phép `in_progress ↔ review`, mọi trạng thái → `archived`).
 
 **Asset (review)** — tách biệt với trạng thái job:
+
 ```
 draft ──submit──▶ pending_review ──approve──▶ approved
   ▲                     │
@@ -55,6 +57,7 @@ approved ──new revision──▶ draft   (phải duyệt lại)
 ## 3. Migration SQL
 
 ### 0001_init_extensions.sql
+
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
@@ -66,6 +69,7 @@ $$ LANGUAGE plpgsql;
 ```
 
 ### 0002_users_rbac.sql
+
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -116,6 +120,7 @@ CREATE TRIGGER trg_users_updated BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUN
 ```
 
 ### 0003_files.sql
+
 ```sql
 CREATE TABLE asset_files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,6 +143,7 @@ CREATE INDEX idx_files_status_created ON asset_files (upload_status, created_at)
 ```
 
 ### 0004_brands_products.sql
+
 ```sql
 CREATE TABLE brands (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -193,6 +199,7 @@ CREATE TRIGGER trg_products_updated BEFORE UPDATE ON products FOR EACH ROW EXECU
 ```
 
 ### 0005_campaigns.sql
+
 ```sql
 -- brief: {product_ids[], target_audience, key_message, verified_offer, channels[], formats[{type,count}], deadline, notes}
 CREATE TABLE campaigns (
@@ -223,6 +230,7 @@ CREATE TRIGGER trg_campaigns_updated BEFORE UPDATE ON campaigns FOR EACH ROW EXE
 ```
 
 ### 0006_assets.sql
+
 ```sql
 CREATE TABLE content_assets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -308,6 +316,7 @@ CREATE TRIGGER trg_scenes_updated BEFORE UPDATE ON video_scenes FOR EACH ROW EXE
 ```
 
 ### 0007_ai_config.sql
+
 ```sql
 CREATE TABLE ai_providers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -361,6 +370,7 @@ CREATE TABLE prompt_templates (
 ```
 
 ### 0008_jobs.sql
+
 ```sql
 CREATE TABLE ai_jobs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -453,6 +463,7 @@ CREATE INDEX idx_outbox_unpublished ON outbox_events (available_at) WHERE publis
 ```
 
 ### 0009_usage_budget.sql
+
 ```sql
 CREATE TABLE ai_usage_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -515,6 +526,7 @@ CREATE TABLE budget_reservations (
 ```
 
 ### 0010_audit_notifications.sql
+
 ```sql
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY,
@@ -545,6 +557,21 @@ CREATE INDEX idx_notifications_user_unread ON notifications (user_id, created_at
 ```
 
 ### 0011_seed.sql (dữ liệu khởi tạo)
+
+CREATE TABLE notifications (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+user_id UUID NOT NULL REFERENCES users(id),
+type TEXT NOT NULL, -- job_failed, review_requested, changes_requested, budget_alert
+payload JSONB NOT NULL DEFAULT '{}',
+read_at TIMESTAMPTZ,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_notifications_user_unread ON notifications (user_id, created_at DESC) WHERE read_at IS NULL;
+
+````
+
+### 0011_seed.sql (dữ liệu khởi tạo)
+
 ```sql
 INSERT INTO roles (code, name) VALUES
  ('admin','Admin'), ('marketing_lead','Marketing Lead'),
@@ -553,6 +580,7 @@ INSERT INTO roles (code, name) VALUES
 -- role_permissions theo bảng RBAC ở SPEC-01 §2
 -- budget_settings 1 dòng với giá trị từ OQ-03
 -- ai_providers 'fake' + model fake cho local/test
+`-- ai_providers 'fake' + model fake cho local/test
 ```
 
 ## 4. Ghi chú truy vấn quan trọng
@@ -561,3 +589,4 @@ INSERT INTO roles (code, name) VALUES
 - **Reservation** chạy trong transaction tạo job, khóa dòng `budgets` theo thứ tự cố định (global trước, campaign sau) để tránh deadlock.
 - **Dispatcher**: `SELECT id, topic, payload FROM outbox_events WHERE published_at IS NULL AND available_at <= now() ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`.
 - **Version number**: `SELECT coalesce(max(version_no),0)+1 ... FOR UPDATE` trên dòng `content_assets` cha.
+````
