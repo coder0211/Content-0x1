@@ -289,6 +289,71 @@ func Permanent(err error) error {
 	return permanentError{err: err}
 }
 
+// ---------------------------------------------------------------------------
+// Additive contract (Agent 3, job engine). Everything below is optional for
+// callers; the in-memory jobtest fake does not need to implement it.
+
+// CancelHandler is an optional extension of StepHandler. When a job is
+// cancelled while one of its steps is waiting_provider, the engine calls
+// OnCancel (with ProviderJobID set) so the handler can call
+// provider.Cancel when supported; usage must still be recorded by the
+// handler because providers may charge anyway (SPEC-02 §5.3).
+type CancelHandler interface {
+	OnCancel(ctx context.Context, sc StepContext) error
+}
+
+// CreateRateLimit is the per-user limit of user-initiated job creations
+// (ACS-043): 30 per minute, else 429 RATE_LIMITED.
+const (
+	CreateRateLimit       = 30
+	CreateRateLimitWindow = time.Minute
+)
+
+// CreateRateLimiter is implemented by the job module's real API. Create
+// already enforces the limit for every job with an IdempotencyKey (i.e.
+// user-initiated), so callers need nothing. A module that wants to reject
+// early (before estimation/validation) may mount RateLimitCreate in its
+// handler; the returned ctx is marked so Create does not count twice —
+// pass it on to the use case.
+type CreateRateLimiter interface {
+	CheckCreateRate(ctx context.Context, userID kernel.ID) (context.Context, error)
+}
+
+type rateCheckedKey struct{}
+
+// WithRateChecked marks ctx as already rate-limited for job creation.
+func WithRateChecked(ctx context.Context) context.Context {
+	return context.WithValue(ctx, rateCheckedKey{}, true)
+}
+
+// RateChecked reports whether ctx was marked by WithRateChecked.
+func RateChecked(ctx context.Context) bool {
+	v, _ := ctx.Value(rateCheckedKey{}).(bool)
+	return v
+}
+
+// RateLimitCreate applies the job-creation rate limit when api supports it
+// (no-op for fakes). Typical middleware in another module's adapter/http:
+//
+//	func jobRate(jobs jobuc.API) func(http.Handler) http.Handler {
+//		return func(next http.Handler) http.Handler {
+//			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//				ctx, err := jobuc.RateLimitCreate(r.Context(), jobs, httpx.ActorFrom(r).UserID)
+//				if err != nil {
+//					httpx.Error(w, r, err) // 429 RATE_LIMITED
+//					return
+//				}
+//				next.ServeHTTP(w, r.WithContext(ctx))
+//			})
+//		}
+//	}
+func RateLimitCreate(ctx context.Context, api API, userID kernel.ID) (context.Context, error) {
+	if rl, ok := api.(CreateRateLimiter); ok {
+		return rl.CheckCreateRate(ctx, userID)
+	}
+	return ctx, nil
+}
+
 // IsPermanent reports whether err was marked with Permanent or is a domain
 // error.
 func IsPermanent(err error) bool {
