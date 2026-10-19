@@ -55,7 +55,7 @@ describe("Content Studio", { timeout: 30000 }, () => {
     await user.clear(title);
     await user.type(title, "Tiêu đề đã sửa");
     await user.click(screen.getByRole("button", { name: "Lưu phiên bản" }));
-    const history = await screen.findByRole(
+    await screen.findByRole(
       "list",
       { name: "Lịch sử phiên bản" },
       { timeout: 5000 },
