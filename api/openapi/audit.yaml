@@ -1,0 +1,83 @@
+# Fragment owned by module audit.
+paths:
+  /audit-logs:
+    get:
+      tags: [audit]
+      operationId: listAuditLogs
+      summary: Append-only audit log (audit.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: actor_id, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: resource_id, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Audit entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AuditLog" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /notifications:
+    get:
+      tags: [audit]
+      operationId: listNotifications
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: unread, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Notifications of the current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Notification" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /notifications/{id}/read:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [audit]
+      operationId: markNotificationRead
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    AuditLog:
+      type: object
+      required: [id, action, resource_type, resource_id, created_at]
+      properties:
+        id: { type: integer }
+        actor_id: { type: [string, "null"], format: uuid }
+        actor_email: { type: string }
+        action: { type: string, example: budget.update }
+        resource_type: { type: string }
+        resource_id: { type: string }
+        before: { type: [object, "null"] }
+        after: { type: [object, "null"] }
+        ip: { type: string }
+        request_id: { type: string }
+        created_at: { type: string, format: date-time }
+    Notification:
+      type: object
+      required: [id, type, payload, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        type: { type: string, enum: [job_failed, job_succeeded, review_requested, changes_requested, asset_approved, budget_alert] }
+        payload: { type: object }
+        read_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }

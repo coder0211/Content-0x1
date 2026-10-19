@@ -50,3 +50,18 @@ Nguồn: PRD "AI Content Studio" (ChatGPT share, v1.0). Bộ tài liệu này ch
 | OQ-05 | Hạ tầng triển khai (VM + Docker Compose hay K8s nội bộ), S3 provider (AWS S3 / MinIO)         | DevOps         | Trước Sprint 1                |
 | OQ-06 | Thời gian lưu trữ file tạm & asset bị reject (retention)                                      | PO             | Trước Sprint 4                |
 | OQ-07 | Giới hạn video MVP: thời lượng tối đa, số cảnh tối đa, độ phân giải (phụ thuộc OQ-01)         | PO + Tech lead | Đầu Sprint 3                  |
+
+## Chạy local (≤ 10 phút)
+
+Yêu cầu: Docker, Go 1.26, Node ≥ 20.19 + pnpm, ffmpeg (cho render/ffprobe).
+
+```bash
+make up            # postgres 16, redis 7, minio (+bucket acs-assets), mailpit (http://localhost:8025)
+make migrate       # áp dụng migrations 0001–0011
+make seed          # admin demo: admin@acs.local / admin12345! (chỉ local)
+make run-api       # API http://localhost:8080 (healthz, readyz, metrics, /api/v1)
+make run-worker    # worker (QUEUES=text,image để giới hạn queue)
+cd web && pnpm install && pnpm dev   # web http://localhost:5173
+```
+
+Khác: `make test` (không cần Docker), `make lint`, `make gen` (sqlc + OpenAPI + types FE), `make up-app` (chạy api/worker trong container). Quy ước cho developer/agent: [docs/CONVENTIONS.md](docs/CONVENTIONS.md). Quyết định đã chốt: [docs/DECISIONS.md](docs/DECISIONS.md).

@@ -1,0 +1,106 @@
+# Fragment owned by module file.
+paths:
+  /files/upload-url:
+    post:
+      tags: [files]
+      operationId: createUploadUrl
+      summary: Create a pending file and a presigned PUT URL (expires ≤ 15 min)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [filename, mime_type, size_bytes, purpose]
+              properties:
+                filename: { type: string, maxLength: 255 }
+                mime_type: { type: string, example: image/png }
+                size_bytes: { type: integer, minimum: 1 }
+                purpose: { $ref: "#/components/schemas/UploadPurpose" }
+      responses:
+        "201":
+          description: Upload ticket. PUT the bytes to `url` with exactly `headers`, then call /files/{id}/complete.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [file_id, url, method, headers, expires_at]
+                    properties:
+                      file_id: { $ref: "#/components/schemas/UUID" }
+                      url: { type: string }
+                      method: { type: string, enum: [PUT] }
+                      headers: { type: object, additionalProperties: { type: string } }
+                      expires_at: { type: string, format: date-time }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+  /files/{id}/complete:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [files]
+      operationId: completeUpload
+      summary: Verify magic bytes, size, dimensions/duration (ffprobe); ready, or 413/415 and the object is deleted
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200":
+          description: File is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/File" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+  /files/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [files]
+      operationId: getFile
+      summary: Metadata + signed GET URL (uploader or admin only)
+      responses:
+        "200":
+          description: File
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/File" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    UploadPurpose:
+      type: string
+      enum: [brand_logo, reference_image, image_mask, video_source, music, document]
+    FileKind: { type: string, enum: [image, video, audio, subtitle, document, other] }
+    File:
+      type: object
+      required: [id, mime_type, size_bytes, kind, upload_status, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        original_name: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        kind: { $ref: "#/components/schemas/FileKind" }
+        upload_status: { type: string, enum: [pending, ready, rejected] }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+        duration_ms: { type: [integer, "null"] }
+        created_at: { type: string, format: date-time }
+        url: { type: [string, "null"], description: Signed GET URL (≤ 15 min) }
+        url_expires_at: { type: [string, "null"], format: date-time }

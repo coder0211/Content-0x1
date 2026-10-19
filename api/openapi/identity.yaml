@@ -1,0 +1,199 @@
+# Fragment owned by module identity. Only `paths` and `components` are merged.
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Log in (sets acs_session + acs_csrf cookies)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [user, csrf_token, expires_at]
+                    properties:
+                      user: { $ref: "#/components/schemas/Me" }
+                      csrf_token: { type: string }
+                      expires_at: { type: string, format: date-time }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "423": { $ref: "#/components/responses/Locked" }
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Revoke the current session
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Current user, roles and effective permissions
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/Me" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      summary: List users (user.manage)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/UserStatus" } }
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/User" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [users]
+      operationId: createUser
+      summary: Create a user with a temporary password (user.manage, audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, name, role_codes, temp_password]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                role_codes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/RoleCode" } }
+                temp_password: { type: string, minLength: 10 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /users/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [users]
+      operationId: getUser
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [users]
+      operationId: updateUser
+      summary: Update name/status/roles; locking or disabling revokes all sessions (audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string }
+                status: { $ref: "#/components/schemas/UserStatus" }
+                role_codes: { type: array, minItems: 1, items: { $ref: "#/components/schemas/RoleCode" } }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/User" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    RoleCode: { type: string, enum: [admin, marketing_lead, content_creator, reviewer] }
+    Permission:
+      type: string
+      enum: [user.manage, provider.manage, provider.view, budget.manage, brand.manage, brand.view,
+             campaign.manage, generate.run, asset.review, asset.download, usage.view, audit.view]
+    UserStatus: { type: string, enum: [active, locked, disabled] }
+    Me:
+      type: object
+      required: [id, email, name, roles, permissions]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        email: { type: string }
+        name: { type: string }
+        roles: { type: array, items: { $ref: "#/components/schemas/RoleCode" } }
+        permissions: { type: array, items: { $ref: "#/components/schemas/Permission" } }
+    User:
+      type: object
+      required: [id, email, name, status, roles, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        email: { type: string }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        roles: { type: array, items: { $ref: "#/components/schemas/RoleCode" } }
+        locked_until: { type: [string, "null"], format: date-time }
+        last_login_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }

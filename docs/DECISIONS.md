@@ -1,0 +1,54 @@
+# DECISIONS — chốt câu hỏi mở (OQ) cho triển khai MVP
+
+Ngày chốt: 18/10/2026. Nguyên tắc: phương án **cân bằng** giữa chi phí, rủi ro, tốc độ giao hàng; mọi lựa chọn đều nằm sau interface/config để đổi được mà không sửa nghiệp vụ.
+
+| ID    | Quyết định | Lý do |
+| ----- | ---------- | ----- |
+| OQ-01 | **Text:** Anthropic Claude (`claude-sonnet-5-5`, structured output qua tool/JSON schema). **Image:** OpenAI Images (`gpt-image-1`, generate + edit). **Video:** Google Veo qua Gemini API (async submit/poll) **+ fallback nội bộ `kenburns`** (ảnh tĩnh → clip bằng FFmpeg zoompan, chi phí 0). **TTS:** Google Cloud Text-to-Speech (`vi-VN` Neural2/Wavenet, có timepoints). Mọi loại có **fake provider** để chạy local/CI không cần key. Live test chỉ chạy khi có env key (`-tags=live`). | Tiếng Việt tốt, giá hợp lý, có API status/cancel; fallback kenburns khử rủi ro critical path video. |
+| OQ-02 | **Email + password nội bộ** (argon2id, session cookie) cho MVP. Thiết kế `identity` để thêm Google Workspace OIDC sau go-live (không làm trong MVP). | Không phụ thuộc IT, đúng ACS-006; SSO là P1. |
+| OQ-03 | Tiền tệ **USD**. Ngân sách global **$1,000/tháng**, cảnh báo **80% và 100%**, `hard_stop=true` (Admin override có audit). Hạn mức per-job mặc định: text **$0.50**, image **$2**, video **$8**. Campaign budget tùy chọn. | Đủ cho pilot 3–5 user; per-job chặn lỗi cấu hình đắt. |
+| OQ-04 | **Thư viện nhạc nội bộ**: chỉ upload track có `license_json` (nguồn, loại license, hạn). Seed 0 track; video không có nhạc nếu brand chưa có track hợp lệ. | Tránh rủi ro bản quyền, không chặn MVP. |
+| OQ-05 | **VM + Docker Compose** (staging & prod), Nginx reverse proxy. Storage: **MinIO** cho local/staging, **S3-compatible** (AWS S3 hoặc MinIO prod) cho prod qua cùng client. | Team nhỏ, vận hành đơn giản; K8s để sau. |
+| OQ-06 | File tạm / upload `pending` xóa sau **24h**. Asset `archived` giữ **90 ngày** rồi purge file (giữ metadata + audit). Clip cảnh trung gian của video đã approved giữ **30 ngày**. | Cân bằng chi phí lưu trữ và khả năng khôi phục. |
+| OQ-07 | Video MVP: tối đa **60s**, **10 cảnh**, mỗi cảnh **2–8s**; preset `9:16` 1080×1920, `1:1` 1080×1080, `16:9` 1920×1080; 30fps, H.264/AAC. | Khớp giới hạn clip phổ biến của provider, giữ chi phí/clip thấp. |
+
+## Quyết định kỹ thuật bổ sung (để agent không bị kẹt)
+
+- Go module path: `github.com/be/acs/api`. Go 1.26. DB access: **pgx v5 + sqlc** (sinh code commit vào repo; dev chạy `go run github.com/sqlc-dev/sqlc/cmd/sqlc generate`). Migrations: **goose** (chạy bằng `go run` hoặc embed trong `cmd/acs migrate`).
+- Queue: **asynq** trên Redis. Web: **pnpm**, Vite, React 19, TS strict, Tailwind, shadcn/ui, TanStack Query, Vitest, Playwright.
+- Test DB: testcontainers khi có Docker; nếu không có Docker thì test integration tự `t.Skip` — unit test (domain/usecase với fake repo) luôn chạy.
+- Docker daemon có thể không chạy trên máy dev → mọi agent phải đảm bảo `go build ./... && go test ./...` và `pnpm build && pnpm test` pass mà không cần Docker.
+
+## Agent 2 — Frontend foundation (web/)
+
+- **Toolchain pinned to stable majors:** Vite 7, TypeScript 5.9, ESLint 9, Tailwind **3.4** (SPEC-05 §2.5 uses `tailwind.config.ts`), Vitest 3, MSW 2, React Router 7 (data router), TanStack Query 5, React 19. Newer majors (TS 7, Tailwind 4, ESLint 10…) are not supported by typescript-eslint/eslint-plugin-boundaries yet.
+- **Tailwind theme is replaced, not extended**, for colors, font size, weight, radius, and shadow. Only SPEC-05 tokens exist. Lint (ESLint `no-restricted-syntax` + `scripts/check-forbidden-css.mjs`) additionally bans gradient, blur, `rounded-2xl+`, `shadow-lg+`, non-token text sizes and weights, and `rounded-full` outside `shared/ui`. The `eslint-plugin-tailwindcss` mentioned in SPEC-05 is not used (its Tailwind support lags behind).
+- **shadcn/ui components are vendored by hand** into `web/src/shared/ui` (Radix + cva) and restyled to tokens. No `components.json`/CLI, since the current CLI targets Tailwind 4. Toast uses `sonner`.
+- **CSRF:** read the `acs_csrf` cookie (matches api `CSRF_COOKIE` default) → header `X-CSRF-Token`, falling back to `csrf_token` from `POST /auth/login`. A wrong password returns `401 INVALID_CREDENTIALS` (matches api). `GET /me` 401 means anonymous; any other 401 → redirect `/login?next=…&reason=expired`.
+- **Errors:** mutation errors toast automatically (code → Vietnamese copy in `shared/lib/errors.ts`; opt out with `meta.silentError`). Query errors render inline with `ErrorState`. `ApiError` lives in `shared/kernel` so every layer can branch on `code`.
+- **Permission-based navigation:** an extra sidebar item **"Chi phí & ngân sách"** (`/usage`, `usage.view`, module `budget`) satisfies the ACS-010 AC. Settings is visible with `anyOf [user.manage, provider.view, budget.manage, audit.view]`. `PermissionRequirement` supports a single code, all-of arrays, and `{ anyOf }`. Route permission comes from `handle.permission`, and the shell renders `NoPermission` (never a silent hide). Job pages (`/jobs`) have no sidebar entry.
+- **Module contract:** each `modules/<m>/index.ts` exports `routes` / `publicRoutes` / `navItems` / `repositories`. `app/modules.ts` and `app/mocks/handlers.ts` hold one line per module and are pre-filled for all 12 modules, so feature agents never edit `app/`. DI is a `RepositoryRegistry` interface augmented per module (`declare module "@/shared/lib/di"`).
+- **Boundaries:** `application` and `presentation` may import **other modules only via `index.ts`**. Only `infrastructure` may import `shared/api`. `domain` imports only `shared/kernel`. Tests are exempt.
+- **Dependencies preinstalled** to avoid lockfile conflicts between parallel agents: react-hook-form, zod 4, @hookform/resolvers, zustand, @dnd-kit (storyboard drag and drop), Radix primitives. Adding packages requires the orchestrator.
+- **Fonts self-hosted** via `@fontsource/be-vietnam-pro` (400/500/600) and `@fontsource/jetbrains-mono` (works on an offline intranet; no Google Fonts CDN).
+- **Mock mode:** `pnpm dev:mock` (`.env.mock`, `VITE_API_MOCKING=true`) runs the whole UI on MSW. Seed accounts are `admin|lead|creator|reviewer@acs.local`, password `matkhau123`. Playwright runs against it.
+- **`/_design`** is a public route (no login) so the PO can review the style without a backend.
+- **Test env on Node ≥ 22:** `src/test/polyfills.ts` replaces Node's experimental `localStorage` and strips jsdom `AbortSignal`s that undici's `Request` rejects (a known jsdom + React Router data-router issue).
+
+## Agent 1 — Backend foundation (api/, root tooling)
+
+- **File storage is its own module `file`** (not part of `asset`): `asset_files` is referenced by brand assets, image references, scene sources, renders and asset versions, so it is a leaf module (`file/usecase/api.go`), and `asset` links versions to file IDs. The `asset` module keeps content assets, versions, approvals and audited downloads.
+- **Schema additions to SPEC-03 (in base migrations, not later):** `users.last_failed_login_at` (true 5-failures-per-15-minutes window), `budget_settings.global_monthly_limit/global_alert_thresholds/global_hard_stop` (template for each month's lazily created global budget, OQ-03 $1,000), helper `immutable_unaccent()` for `search_tsv`, extra indexes (`idx_usage_job`, `idx_reservations_job`, `idx_audit_created`, `idx_notifications_user_created`), `set_updated_at` trigger on `ai_providers`.
+- **Audit append-only** is enforced by a trigger that blocks UPDATE/DELETE/TRUNCATE for every role, plus `REVOKE` when an `acs_app` role exists (prod). This covers ACS-009 without requiring a separate DB role locally.
+- **Seed 0011:** roles + RBAC matrix (kept equal to `kernel.RolePermissions` by a test), budget settings (OQ-03), `fake` provider with default text/image/video/voice models and pricing `fake-2026-10`. Real providers/models/pricing and prompt templates are seeded by their modules in later migrations.
+- **Migration numbering:** reserved blocks per module (see `docs/CONVENTIONS.md` §5) so parallel agents never collide.
+- **Session/CSRF:** session cookie `acs_session` (HttpOnly, SameSite=Lax, Secure in prod) holds a random 256-bit token; only its SHA-256 is stored. CSRF = synchronizer token stored on the session, mirrored to the readable cookie `acs_csrf` and returned by login; non-GET requests must send it in `X-CSRF-Token` (login exempt). `last_seen_at` is written at most once per minute. Idle 12h / absolute 7d / lockout 5 per 15 min are env-configurable.
+- **Login error codes:** wrong e-mail or password → `401 INVALID_CREDENTIALS` (indistinguishable, constant-time); temporary lockout and admin lock → `423 ACCOUNT_LOCKED`; disabled → `403 ACCOUNT_DISABLED`; expired/revoked session → `401 SESSION_EXPIRED`; no cookie → `401 UNAUTHENTICATED`. Admins cannot lock/disable themselves or drop their own admin role. Password minimum length: 10.
+- **Malformed path IDs return 404** (they cannot name a resource); unknown JSON fields return `400 VALIDATION_FAILED`.
+- **Idempotency:** `httpx.RequireIdempotencyKey` validates the UUID header and hashes `METHOD path\nbody`; de-duplication is done by `job.API.Create` on `(created_by, idempotency_key)`. A missing/invalid key is `400 IDEMPOTENCY_KEY_REQUIRED`.
+- **Job → budget coupling** goes through hooks wired in `internal/app/hooks.go` (`OnFinished` → `Budget.Settle`, `OnRetried` → `Budget.Reserve`), because `job` may not import `budget` (SPEC-06 §2.5). Step handlers call `Budget.RecordUsage` themselves.
+- **AI ports:** `TextGenerator` and `ImageGenerator` both define `Generate`, so a vendor offering several capabilities exposes one adapter type per capability (see `providers/fake`). `VideoGenerator` gained `Download` (fetch output after polling). `ports.Usage.Units` is keyed by `model_pricing.unit` so budget prices any provider uniformly.
+- **Storage:** minio-go (S3-compatible, works with AWS S3) instead of aws-sdk-go-v2; a second client signs URLs for `S3_PUBLIC_ENDPOINT` (browser-facing host). `/files/{id}/complete` downloads the object to a private temp file for ffprobe (no URLs passed to ffprobe, SSRF-safe).
+- **Architecture enforcement:** depguard (framework bans per layer) + `internal/archtest` (module dependency table, R4) which runs in `go test ./...`. `go-arch-lint` is not used; archtest replaces it.
+- **OpenAPI:** fragments `api/openapi/<module>.yaml` bundled by `tools/openapi-bundle` into `api/openapi.yaml` (OpenAPI 3.1, servers `/api/v1`; health endpoints override to `/`). A test fails when the bundle is stale.
+- **Placeholders:** `job, budget, asset, brand, campaign, provider, content` have placeholder `module.go` files that publish the in-memory fakes from `<m>test`, so the server runs end-to-end today; their owners replace `Register`.

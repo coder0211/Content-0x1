@@ -1,0 +1,88 @@
+# golangci-lint v2. Architecture rules (SPEC-06 §2.7) are enforced twice:
+# depguard below (framework bans per layer) and internal/archtest (module
+# dependency table, R4) which also runs in `go test ./...`.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - depguard
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - sqlclosecheck
+    - unconvert
+  settings:
+    depguard:
+      rules:
+        domain:
+          files: ["**/internal/modules/*/domain/**"]
+          list-mode: lax
+          deny:
+            - { pkg: "github.com/jackc/pgx", desc: "domain must not know the database (R1)" }
+            - { pkg: "net/http", desc: "domain must not know HTTP (R1)" }
+            - { pkg: "github.com/hibiken/asynq", desc: "domain must not know the queue (R1)" }
+            - { pkg: "github.com/go-chi/chi", desc: "domain must not know HTTP (R1)" }
+            - { pkg: "github.com/be/acs/api/internal/platform", desc: "frameworks stay outside (R1)" }
+            - { pkg: "github.com/be/acs/api/internal/providers", desc: "use ports, not adapters (R1)" }
+            - { pkg: "github.com/be/acs/api/internal/ports", desc: "domain is pure; ports belong to use cases" }
+        usecase:
+          files: ["**/internal/modules/*/usecase/**", "!$test"]
+          list-mode: lax
+          deny:
+            - { pkg: "github.com/jackc/pgx", desc: "use a repository port (R3)" }
+            - { pkg: "database/sql", desc: "use a repository port (R3)" }
+            - { pkg: "net/http", desc: "use cases are transport-agnostic (R3)" }
+            - { pkg: "github.com/go-chi/chi", desc: "use cases are transport-agnostic (R3)" }
+            - { pkg: "github.com/hibiken/asynq", desc: "use job.API (R3)" }
+            - { pkg: "github.com/redis/go-redis", desc: "use a port (R3)" }
+            - { pkg: "github.com/minio/minio-go", desc: "use ports.ObjectStorage (R3)" }
+            - { pkg: "github.com/be/acs/api/internal/platform", desc: "use ports (R3)" }
+            - { pkg: "github.com/be/acs/api/internal/providers", desc: "use ports.AIProviders (R3)" }
+            - { pkg: "github.com/be/acs/api/internal/app", desc: "composition root only" }
+        kernel:
+          files: ["**/internal/shared/kernel/**", "**/internal/ports/**"]
+          list-mode: lax
+          deny:
+            - { pkg: "github.com/be/acs/api/internal/platform", desc: "kernel/ports are framework-free" }
+            - { pkg: "github.com/be/acs/api/internal/modules", desc: "kernel/ports must not depend on modules" }
+            - { pkg: "github.com/jackc/pgx", desc: "kernel/ports are framework-free" }
+            - { pkg: "net/http", desc: "kernel/ports are framework-free" }
+        platform:
+          files: ["**/internal/platform/**"]
+          list-mode: lax
+          deny:
+            - { pkg: "github.com/be/acs/api/internal/modules", desc: "platform has no business logic" }
+            - { pkg: "github.com/be/acs/api/internal/providers", desc: "platform has no business logic" }
+    gosec:
+      excludes:
+        - G104 # duplicated by errcheck
+        - G115 # integer conversions are bounded by validation
+        - G204 # ffmpeg/ffprobe are executed with argument vectors by design
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+  exclusions:
+    generated: lax
+    presets: [comments, std-error-handling, common-false-positives]
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose, errcheck]
+      - path: internal/testutil/
+        linters: [gosec]
+
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [github.com/be/acs/api]

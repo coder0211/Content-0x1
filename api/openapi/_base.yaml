@@ -1,0 +1,225 @@
+openapi: 3.1.0
+info:
+  title: AI Content Studio API
+  version: 0.1.0
+  description: |
+    REST API `/api/v1` (SPEC-04). JSON snake_case, ISO-8601 UTC times.
+    Success: `{ "data": ..., "meta": { "request_id", "next_cursor"? } }`.
+    Error: `{ "error": { "code", "message", "details": [] }, "meta": { "request_id" } }`.
+    Auth: cookie `acs_session` (HttpOnly). Every non-GET request sends
+    `X-CSRF-Token` = value of the readable `acs_csrf` cookie (also returned by login).
+    POST endpoints that create AI jobs require `Idempotency-Key` (UUID) and answer 202.
+    THIS FILE IS GENERATED from api/openapi/*.yaml by `make openapi` — do not edit api/openapi.yaml.
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+tags:
+  - name: ops
+    description: "Health, readiness and metrics (internal)"
+  - name: auth
+    description: "Login, logout and current user"
+  - name: users
+    description: "User and role management"
+  - name: files
+    description: "Uploads and signed downloads"
+  - name: audit
+    description: "Audit log and notifications"
+paths:
+  /healthz:
+    servers: [{ url: / }]
+    get:
+      tags: [ops]
+      operationId: healthz
+      summary: Liveness probe (internal)
+      security: []
+      responses:
+        "200":
+          description: Alive
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: object, properties: { status: { type: string } } }
+                  meta: { $ref: "#/components/schemas/Meta" }
+  /readyz:
+    servers: [{ url: / }]
+    get:
+      tags: [ops]
+      operationId: readyz
+      summary: Readiness probe — postgres, redis, storage (internal)
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string }
+                      checks: { type: object, additionalProperties: { type: string, enum: [up, down] } }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /metrics:
+    servers: [{ url: / }]
+    get:
+      tags: [ops]
+      operationId: metrics
+      summary: Prometheus metrics (internal, not exposed to the internet)
+      security: []
+      responses:
+        "200":
+          description: Prometheus text format
+          content:
+            text/plain: { schema: { type: string } }
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: acs_session
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from `meta.next_cursor`.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID; same key + same body returns the existing job, different body → 409 IDEMPOTENCY_CONFLICT.
+      schema: { type: string, format: uuid }
+    CSRFToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema: { type: string }
+    PathID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    UUID: { type: string, format: uuid }
+    Meta:
+      type: object
+      required: [request_id]
+      properties:
+        request_id: { type: string }
+        next_cursor: { type: [string, "null"] }
+    ListMeta:
+      type: object
+      required: [request_id, next_cursor]
+      properties:
+        request_id: { type: string }
+        next_cursor: { type: [string, "null"] }
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount: { type: number }
+        currency: { type: string, example: USD }
+        is_estimate: { type: boolean }
+    ErrorCode:
+      type: string
+      description: Machine-readable code; the FE switches on it (SPEC-04 §1.2). Modules may add codes.
+      examples:
+        - VALIDATION_FAILED
+        - UNAUTHENTICATED
+        - SESSION_EXPIRED
+        - INVALID_CREDENTIALS
+        - FORBIDDEN
+        - CSRF_INVALID
+        - SELF_APPROVAL_NOT_ALLOWED
+        - ACCOUNT_DISABLED
+        - NOT_FOUND
+        - CONFLICT
+        - INVALID_STATE_TRANSITION
+        - IDEMPOTENCY_CONFLICT
+        - IDEMPOTENCY_KEY_REQUIRED
+        - VERSION_CONFLICT
+        - FILE_TOO_LARGE
+        - UNSUPPORTED_MEDIA_TYPE
+        - CAPABILITY_NOT_SUPPORTED
+        - ACCOUNT_LOCKED
+        - RATE_LIMITED
+        - BUDGET_EXCEEDED
+        - JOB_BUDGET_EXCEEDED
+        - CONCURRENCY_LIMIT
+        - PROVIDER_ERROR
+        - SERVICE_UNAVAILABLE
+        - PRICING_MISSING
+        - INTERNAL
+    ErrorDetail:
+      type: object
+      additionalProperties: true
+      properties:
+        field: { type: string }
+        issue: { type: string }
+    Error:
+      type: object
+      required: [error, meta]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string, description: "Vietnamese, user-facing" }
+            details: { type: array, items: { $ref: "#/components/schemas/ErrorDetail" } }
+        meta: { $ref: "#/components/schemas/Meta" }
+    JobAccepted:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id: { $ref: "#/components/schemas/UUID" }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        estimated_cost: { $ref: "#/components/schemas/Money" }
+  responses:
+    NoContent:
+      description: No content
+    BadRequest:
+      description: VALIDATION_FAILED
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthorized:
+      description: UNAUTHENTICATED / SESSION_EXPIRED
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: FORBIDDEN / CSRF_INVALID
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: NOT_FOUND
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: Conflict (INVALID_STATE_TRANSITION, IDEMPOTENCY_CONFLICT, VERSION_CONFLICT, CONFLICT)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    PayloadTooLarge:
+      description: FILE_TOO_LARGE
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    UnsupportedMediaType:
+      description: UNSUPPORTED_MEDIA_TYPE
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unprocessable:
+      description: CAPABILITY_NOT_SUPPORTED
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Locked:
+      description: ACCOUNT_LOCKED
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    TooManyRequests:
+      description: RATE_LIMITED / BUDGET_EXCEEDED / JOB_BUDGET_EXCEEDED / CONCURRENCY_LIMIT
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    ServiceUnavailable:
+      description: SERVICE_UNAVAILABLE / PRICING_MISSING
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
