@@ -32,6 +32,9 @@ type renderOutput struct {
 	Width           int        `json:"width"`
 	Height          int        `json:"height"`
 	Rerendered      bool       `json:"rerendered,omitempty"`
+	// SubtitlesSoftFallback: burn-in requested but unavailable in this
+	// FFmpeg build; the MP4 carries a soft subtitle track instead.
+	SubtitlesSoftFallback bool `json:"subtitles_soft_fallback,omitempty"`
 }
 
 // RunRender is the video_render step. The DAG only schedules it after every
@@ -142,7 +145,8 @@ func (s *Service) renderOnce(ctx context.Context, sc jobuc.StepContext, p *domai
 			subtitleFile = &id
 		}
 	}
-	if _, err := s.Renderer.Render(ctx, spec); err != nil {
+	rendered, err := s.Renderer.Render(ctx, spec)
+	if err != nil {
 		return renderOutput{}, err
 	}
 	final, err := s.store(ctx, sc, spec.Output, fileuc.StoreInput{MimeType: "video/mp4", Kind: "video", Source: "rendered",
@@ -150,7 +154,8 @@ func (s *Service) renderOnce(ctx context.Context, sc jobuc.StepContext, p *domai
 	if err != nil {
 		return renderOutput{}, err
 	}
-	out := renderOutput{FileID: final.ID, SubtitleFileID: subtitleFile, DurationMs: total, Width: format.Width, Height: format.Height}
+	out := renderOutput{FileID: final.ID, SubtitleFileID: subtitleFile, DurationMs: total, Width: format.Width, Height: format.Height,
+		SubtitlesSoftFallback: rendered.SubtitlesSoftFallback}
 	thumb := filepath.Join(dir, "thumbnail.jpg")
 	at := time.Duration(min(1000, total/2)) * time.Millisecond
 	if err := s.Renderer.Thumbnail(ctx, spec.Output, thumb, at); err == nil {

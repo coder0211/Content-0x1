@@ -6,6 +6,7 @@ const base: Job = {
   status: "running",
   progress: 10,
   createdBy: "u1",
+  createdByName: "",
   campaignId: null,
   assetId: null,
   providerCode: "veo",

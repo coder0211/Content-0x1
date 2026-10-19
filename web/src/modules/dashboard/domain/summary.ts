@@ -27,8 +27,16 @@ export interface DashboardSummary {
 
 export const JOB_TYPE_LABELS: Record<string, string> = {
   content_generation: "Sinh nội dung",
+  content_rewrite: "Viết lại nội dung",
+  content_transform: "Chuyển đổi nội dung",
+  content_plan: "Lập kế hoạch nội dung",
   image_generation: "Sinh ảnh",
+  image_edit: "Chỉnh sửa ảnh",
+  image_prompt_suggest: "Gợi ý mô tả ảnh",
+  video_storyboard: "Kịch bản & storyboard",
   video_production: "Sản xuất video",
+  video_scene_regenerate: "Sinh lại cảnh",
+  video_render: "Render video",
   brand_extraction: "Trích xuất brand",
 };
 

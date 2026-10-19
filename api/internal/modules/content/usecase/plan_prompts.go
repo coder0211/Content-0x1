@@ -46,8 +46,10 @@ func (s *Service) StartContentPlan(ctx context.Context, actor kernel.Actor, in P
 	}
 	c := gc.Campaign
 	formats := make([]map[string]any, 0, len(c.Brief.Formats))
+	formatSlugs := make([]string, 0, len(c.Brief.Formats))
 	for _, f := range c.Brief.Formats {
 		formats = append(formats, map[string]any{"type": f.Type, "count": f.Count})
+		formatSlugs = append(formatSlugs, f.Type)
 	}
 	channels := c.Brief.Channels
 	if channels == nil {
@@ -75,6 +77,7 @@ func (s *Service) StartContentPlan(ctx context.Context, actor kernel.Actor, in P
 			MaxTokens: 2500, Language: in.Language, ForbiddenWords: gc.Brand.ForbiddenWords,
 			BrandID: gc.Brand.BrandID, BrandVersionID: gc.Brand.BrandVersionID, BrandVersionNo: gc.Brand.VersionNo,
 			ProductIDs: gc.ProductIDs, Brief: gc.Brief,
+			PlanChannels: channels, PlanFormats: formatSlugs,
 		},
 		Request: map[string]any{"campaign_id": cid, "language": in.Language},
 	})

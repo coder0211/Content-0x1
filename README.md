@@ -56,7 +56,7 @@ Nguồn: PRD "AI Content Studio" (ChatGPT share, v1.0). Bộ tài liệu này ch
 Yêu cầu: Docker, Go 1.26, Node ≥ 20.19 + pnpm, ffmpeg (cho render/ffprobe).
 
 ```bash
-make up            # postgres 16, redis 7, minio (+bucket acs-assets), mailpit (http://localhost:8025)
+make up            # postgres 16, redis 7, S3 storage (SeaweedFS, bucket acs-assets), mailpit (http://localhost:8025)
 make migrate       # áp dụng migrations 0001–0011
 make seed          # admin demo: admin@acs.local / admin12345! (chỉ local)
 make run-api       # API http://localhost:8080 (healthz, readyz, metrics, /api/v1)

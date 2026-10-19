@@ -3244,6 +3244,7 @@ components:
         - status
         - progress
         - created_by
+        - created_by_name
         - campaign_id
         - asset_id
         - provider_code
@@ -3261,6 +3262,7 @@ components:
         status: {$ref: "#/components/schemas/JobStatus"}
         progress: {type: integer, minimum: 0, maximum: 100}
         created_by: {$ref: "#/components/schemas/UUID"}
+        created_by_name: {type: string, description: "Creator display name (empty when unknown)"}
         campaign_id: {type: [string, "null"], format: uuid}
         asset_id: {type: [string, "null"], format: uuid}
         provider_code: {type: [string, "null"]}

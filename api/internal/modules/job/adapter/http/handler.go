@@ -21,6 +21,15 @@ import (
 type Handler struct {
 	Svc        *usecase.Service
 	Subscriber ports.EventSubscriber
+	// UserNames resolves creator display names (nil: names stay empty).
+	UserNames func(ctx context.Context, ids []kernel.ID) map[kernel.ID]string
+}
+
+func (h *Handler) names(ctx context.Context, ids []kernel.ID) map[kernel.ID]string {
+	if h.UserNames == nil || len(ids) == 0 {
+		return map[kernel.ID]string{}
+	}
+	return h.UserNames(ctx, ids)
 }
 
 // Routes registers routes on the /api/v1 router. Authorization (owner or
@@ -113,8 +122,15 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := make([]jobSummaryDTO, 0, len(res.Items))
+	ids := make([]kernel.ID, 0, len(res.Items))
 	for _, j := range res.Items {
-		items = append(items, summaryDTO(j.JobView, j.NeedsReconciliation))
+		ids = append(ids, j.CreatedBy)
+	}
+	names := h.names(r.Context(), ids)
+	for _, j := range res.Items {
+		d := summaryDTO(j.JobView, j.NeedsReconciliation)
+		d.CreatedByName = names[j.CreatedBy]
+		items = append(items, d)
 	}
 	httpx.List(w, r, items, res.NextCursor)
 }
@@ -143,7 +159,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.OK(w, r, detail(actor, d))
+	out := detail(actor, d)
+	out.CreatedByName = h.names(r.Context(), []kernel.ID{d.CreatedBy})[d.CreatedBy]
+	httpx.OK(w, r, out)
 }
 
 func (h *Handler) history(w http.ResponseWriter, r *http.Request) {

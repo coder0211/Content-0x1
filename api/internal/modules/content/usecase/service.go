@@ -192,6 +192,11 @@ type stepInput struct {
 
 	Colors []prompt.Color `json:"colors,omitempty"`
 	Tone   []string       `json:"tone,omitempty"`
+
+	// PlanChannels / PlanFormats are the campaign brief's channel and
+	// format slugs; content_plan output is snapped onto them.
+	PlanChannels []string `json:"plan_channels,omitempty"`
+	PlanFormats  []string `json:"plan_formats,omitempty"`
 }
 
 // jobPlan is what a request use case hands to start().

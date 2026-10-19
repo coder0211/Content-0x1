@@ -23,6 +23,10 @@ func TestProviderRepositoryAgainstSeed(t *testing.T) {
 	ctx := context.Background()
 	svc := &usecase.Service{Tx: db.NewTxManager(pool), Repo: postgres.NewRepository(pool), Clock: ports.SystemClock{}, Audit: &testutil.Audit{}}
 	admin := testutil.Actor(kernel.RoleAdmin)
+	// Template versions reference users(id) via created_by.
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, email, name, password_hash) VALUES ($1, 'provider-admin@acs.local', 'Admin', 'x')`, admin.UserID); err != nil {
+		t.Fatal(err)
+	}
 
 	ps, err := svc.AdminListProviders(ctx, admin)
 	if err != nil || len(ps) != 6 {

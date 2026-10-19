@@ -12,7 +12,26 @@ export function setDashboardMock(fn: ((d: DashboardSummaryDto) => DashboardSumma
   override = fn;
 }
 
+/** In-memory notifications of the mock session (GET /notifications, POST /notifications/{id}/read). */
+const readIds = new Set<string>();
+const mockNotifications = () => [
+  {
+    id: "40000000-0000-4000-8000-000000000001",
+    type: "asset_approved",
+    payload: { title: "Bài Facebook: Bánh kem Tết vị trà xanh", actor_name: "Người duyệt", asset_id: "50000000-0000-4000-8000-000000000001" },
+    created_at: ago(15),
+  },
+].map((n) => ({ ...n, read_at: readIds.has(n.id) ? ago(1) : null }));
+
 export const handlers: HttpHandler[] = [
+  rest.get(api("/notifications"), withAuth(null, () => ok(mockNotifications()))),
+  rest.post(
+    api("/notifications/:id/read"),
+    withAuth(null, ({ params }) => {
+      readIds.add(String(params.id));
+      return new Response(null, { status: 204 });
+    }),
+  ),
   rest.get(
     api("/dashboard/summary"),
     withAuth(null, ({ user }) => {

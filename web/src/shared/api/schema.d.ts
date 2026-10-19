@@ -2311,6 +2311,8 @@ export interface components {
             status: components["schemas"]["JobStatus"];
             progress: number;
             created_by: components["schemas"]["UUID"];
+            /** @description Creator display name (empty when unknown) */
+            created_by_name: string;
             /** Format: uuid */
             campaign_id: string | null;
             /** Format: uuid */

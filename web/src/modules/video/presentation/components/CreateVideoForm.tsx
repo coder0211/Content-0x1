@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
 import { FormField } from "@/shared/ui/patterns";
-import { useBrandOptions, useCreateVideo, useMusicTracks } from "../../application/useVideo";
+import { useBrandOptions, useCampaignBrandId, useCreateVideo, useMusicTracks } from "../../application/useVideo";
 import {
   DEFAULT_LIMITS,
   MIN_TARGET_SECONDS,
@@ -52,7 +52,10 @@ export function CreateVideoForm({ campaignId, scriptFromAssetId, onCreated }: Cr
   const keyRef = useRef<string | null>(null);
 
   const brands = useBrandOptions(!campaignId);
-  const tracks = useMusicTracks(campaignId ? null : brandId);
+  // With a campaign the brand comes from the campaign; music tracks are that brand's.
+  const campaignBrand = useCampaignBrandId(campaignId);
+  const musicBrandId = campaignId ? (campaignBrand.data ?? null) : brandId;
+  const tracks = useMusicTracks(musicBrandId);
   const create = useCreateVideo();
 
   function validate(): Record<string, string> {
@@ -212,9 +215,19 @@ export function CreateVideoForm({ campaignId, scriptFromAssetId, onCreated }: Cr
         </label>
         {music ? (
           <FormField label="Bản nhạc" required error={errors["music.track_brand_asset_id"]} helper="Chỉ dùng được nhạc có license.">
-            <Select value={trackId ?? undefined} onValueChange={setTrackId} disabled={!!campaignId || !brandId}>
+            <Select value={trackId ?? undefined} onValueChange={setTrackId} disabled={!musicBrandId || tracks.isLoading}>
               <SelectTrigger aria-label="Bản nhạc">
-                <SelectValue placeholder={campaignId || !brandId ? "Chọn brand trước" : "Chọn bản nhạc"} />
+                <SelectValue
+                  placeholder={
+                    !musicBrandId
+                      ? campaignId
+                        ? "Đang tải brand của campaign…"
+                        : "Chọn brand trước"
+                      : tracks.data && tracks.data.length === 0
+                        ? "Brand chưa có nhạc"
+                        : "Chọn bản nhạc"
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {(tracks.data ?? []).map((t) => (

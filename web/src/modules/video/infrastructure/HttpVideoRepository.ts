@@ -82,6 +82,11 @@ export class HttpVideoRepository implements VideoRepository {
     return page.items.map(fromBrandDto);
   }
 
+  async getCampaignBrandId(campaignId: ID) {
+    const c = await http.get<{ brand_id: ID }>(`/campaigns/${encodeURIComponent(campaignId)}`);
+    return c.brand_id;
+  }
+
   async listMusicTracks(brandId: ID) {
     const page = await http.page<BrandAssetDto>(`/brands/${brandId}/assets`, { query: { asset_type: "music" } });
     return page.items.filter((a) => a.asset_type === "music").map(fromBrandAssetDto);

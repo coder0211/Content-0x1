@@ -8,6 +8,7 @@ export interface JobSummaryDto {
   status: JobStatus;
   progress: number;
   created_by: string;
+  created_by_name: string;
   campaign_id: string | null;
   asset_id: string | null;
   provider_code: string | null;
@@ -70,6 +71,7 @@ export function toJobSummary(d: JobSummaryDto): JobSummary {
     status: d.status,
     progress: d.progress,
     createdBy: d.created_by,
+    createdByName: d.created_by_name ?? "",
     campaignId: d.campaign_id,
     assetId: d.asset_id,
     providerCode: d.provider_code,

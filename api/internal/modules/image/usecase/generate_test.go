@@ -260,6 +260,16 @@ func TestVariationsAndEdits(t *testing.T) {
 	if len(v2.FileIDs) != 3 { // original + 2 variants
 		t.Fatalf("v2 files %v", v2.FileIDs)
 	}
+	// The variation batch shows only the images it produced, not the carried-over original.
+	page, err := e.svc.ListBatches(context.Background(), e.creator, usecase.BatchFilter{AssetID: &gen.AssetID}, kernel.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range page.Items {
+		if b.Operation == domain.OpVariation && (b.Asset == nil || len(b.Asset.Images) != 2) {
+			t.Fatalf("variation batch images %+v", b.Asset)
+		}
+	}
 
 	eres, err := e.svc.Edit(context.Background(), e.creator, gen.AssetID, usecase.EditInput{FileID: src, Prompt: "Đổi nền sang màu xanh"})
 	if err != nil {

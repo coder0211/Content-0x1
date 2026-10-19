@@ -116,8 +116,14 @@ func (s *Storage) PresignGet(ctx context.Context, key string, opts ports.Presign
 }
 
 // Put uploads r (size -1 when unknown).
+//
+// Over plain HTTP (local S3/SeaweedFS) minio-go would otherwise use the
+// aws-chunked streaming signature, and some S3-compatible stores persist
+// "Content-Encoding: aws-chunked" on the object and serve it back on GET,
+// which browsers cannot decode (<video>/<img> and downloads). Over TLS no
+// streaming signature is used, so this only changes the local transport.
 func (s *Storage) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
-	_, err := s.client.PutObject(ctx, s.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType})
+	_, err := s.client.PutObject(ctx, s.bucket, key, r, size, minio.PutObjectOptions{ContentType: contentType, DisableContentSha256: true})
 	return err
 }
 

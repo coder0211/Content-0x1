@@ -37,6 +37,8 @@ export interface VideoRepository {
   submitForReview(assetId: ID): Promise<void>;
   listBrands(): Promise<BrandOption[]>;
   listMusicTracks(brandId: ID): Promise<MusicTrack[]>;
+  /** Brand of a campaign (the video's brand when created from a campaign). */
+  getCampaignBrandId(campaignId: ID): Promise<ID>;
 }
 
 declare module "@/shared/lib/di" {

@@ -117,6 +117,10 @@ type VoiceSegment struct {
 type RenderResult struct {
 	Output   string
 	Duration time.Duration
+	// SubtitlesSoftFallback is set when burn-in was requested but the
+	// FFmpeg build has no subtitles filter (no libass): the subtitles were
+	// muxed as a soft track instead of failing the render.
+	SubtitlesSoftFallback bool
 }
 
 // VideoRenderer wraps FFmpeg. Implementations exec FFmpeg with an argument

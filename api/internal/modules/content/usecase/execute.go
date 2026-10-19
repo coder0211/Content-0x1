@@ -57,7 +57,7 @@ func (s *Service) ExecuteStep(ctx context.Context, sc jobuc.StepContext) (jobuc.
 	case StepGeneration, StepRewrite, StepTransform:
 		res, err = s.saveVariants(ctx, sc, job, in, raw)
 	case StepPlan:
-		res, err = s.savePlan(ctx, job, raw)
+		res, err = s.savePlan(ctx, job, in, raw)
 	case StepImagePrompts:
 		res, err = imagePromptsResult(job.ProviderCode, in, raw)
 	default:
@@ -283,11 +283,36 @@ func planSlug(s string) string {
 	return s
 }
 
+// snapSlug maps a model-provided channel/format onto one of the campaign
+// brief's slugs: an exact slug match, else the first allowed slug the value
+// contains or is contained in ("Facebook Post" → "facebook"). Without a
+// match it returns "" so free-form model text ("Bài đăng") never becomes a
+// bogus slug. With no allowed list the plain slug is kept.
+func snapSlug(s string, allowed []string) string {
+	v := planSlug(s)
+	if len(allowed) == 0 || v == "" {
+		return v
+	}
+	for _, a := range allowed {
+		if v == a {
+			return a
+		}
+	}
+	for _, a := range allowed {
+		if strings.Contains(v, a) || strings.Contains(a, v) {
+			return a
+		}
+	}
+	return ""
+}
+
 // toCampaignPlan maps the AI plan onto the campaign plan contract: theme
 // titles become themes, schedule rows become checklist items (idea → topic,
 // theme + angle → angle, invalid dates moved to notes), deliverables are
-// summarised in the summary.
-func toCampaignPlan(p aiPlan) campaignPlan {
+// summarised in the summary. Channels and formats are snapped onto the
+// brief's (channels, formats); an unknown format falls back to the brief's
+// format for that row position.
+func toCampaignPlan(p aiPlan, channels, formats []string) campaignPlan {
 	out := campaignPlan{Summary: strings.TrimSpace(p.Summary), Themes: []string{}, Items: []campaignPlanItem{}}
 	angles := map[string]string{}
 	for _, t := range p.Themes {
@@ -310,11 +335,14 @@ func toCampaignPlan(p aiPlan) campaignPlan {
 		if a := angles[strings.ToLower(angle)]; a != "" {
 			angle += " — " + a
 		}
-		format := planSlug(r.Format)
+		format := snapSlug(r.Format, formats)
+		if format == "" && len(formats) > 0 {
+			format = formats[len(out.Items)%len(formats)]
+		}
 		if format == "" {
 			format = "post"
 		}
-		it := campaignPlanItem{ID: fmt.Sprintf("item-%d", i+1), Topic: topic, Angle: angle, Channel: planSlug(r.Channel), Format: format}
+		it := campaignPlanItem{ID: fmt.Sprintf("item-%d", i+1), Topic: topic, Angle: angle, Channel: snapSlug(r.Channel, channels), Format: format}
 		if d := strings.TrimSpace(r.Date); d != "" {
 			if _, err := time.Parse(time.DateOnly, d); err == nil {
 				it.PublishDate = d
@@ -343,12 +371,12 @@ func toCampaignPlan(p aiPlan) campaignPlan {
 
 // savePlan stores the plan as a proposal on the campaign, in the campaign
 // module's plan shape (campaign/domain.Plan).
-func (s *Service) savePlan(ctx context.Context, job jobuc.JobInfo, raw json.RawMessage) (jobuc.StepResult, error) {
+func (s *Service) savePlan(ctx context.Context, job jobuc.JobInfo, in stepInput, raw json.RawMessage) (jobuc.StepResult, error) {
 	var ai aiPlan
 	if err := json.Unmarshal(raw, &ai); err != nil {
 		return jobuc.StepResult{}, invalidOutput(job.ProviderCode, "output is not a content plan")
 	}
-	plan := toCampaignPlan(ai)
+	plan := toCampaignPlan(ai, in.PlanChannels, in.PlanFormats)
 	if len(plan.Items) == 0 {
 		return jobuc.StepResult{}, invalidOutput(job.ProviderCode, "output is not a content plan")
 	}

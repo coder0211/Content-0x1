@@ -33,6 +33,7 @@ export interface MockJobDto {
   status: JobStatus;
   progress: number;
   created_by: string;
+  created_by_name: string;
   campaign_id: string | null;
   asset_id: string | null;
   provider_code: string | null;
@@ -163,6 +164,7 @@ export function createMockJob(input: MockJobInput = {}): MockJobDto {
     status,
     progress: 0,
     created_by: owner,
+    created_by_name: MOCK_USERS.find((u) => u.id === owner)?.name ?? "",
     campaign_id: input.campaignId ?? null,
     asset_id: input.assetId ?? null,
     provider_code: input.providerCode === undefined ? "fake" : input.providerCode,

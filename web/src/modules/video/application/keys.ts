@@ -5,4 +5,5 @@ export const videoKeys = {
   estimate: (id: string) => ["video", "estimate", id] as const,
   brands: ["video", "brands"] as const,
   music: (brandId: string) => ["video", "music", brandId] as const,
+  campaignBrand: (campaignId: string) => ["video", "campaign-brand", campaignId] as const,
 };

@@ -28,32 +28,31 @@ services:
       timeout: 3s
       retries: 20
 
+  # S3-compatible storage. MinIO images are no longer published on public
+  # registries, so local dev uses SeaweedFS's S3 gateway on the same port and
+  # credentials (the app only speaks plain S3 via minio-go).
   minio:
-    image: minio/minio:latest
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports: ["9000:9000", "9001:9001"]
-    volumes: [miniodata:/data]
+    image: chrislusf/seaweedfs:latest
+    command: ["server", "-dir=/data", "-s3", "-s3.port=9000", "-s3.config=/etc/seaweedfs/s3.json"]
+    ports: ["9000:9000"]
+    volumes:
+      - miniodata:/data
+      - ./deploy/local/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && nc -z 127.0.0.1 9000"]
       interval: 3s
       timeout: 3s
-      retries: 20
+      retries: 40
 
-  # Creates the private bucket with versioning (SPEC-02 §7 Backup).
+  # Creates the private bucket.
   minio-init:
-    image: minio/mc:latest
+    image: chrislusf/seaweedfs:latest
     depends_on:
       minio: { condition: service_healthy }
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >
-        mc alias set local http://minio:9000 minioadmin minioadmin &&
-        mc mb --ignore-existing local/acs-assets &&
-        mc anonymous set none local/acs-assets &&
-        mc version enable local/acs-assets &&
+        echo "s3.bucket.create -name acs-assets" | weed shell -master=minio:9333 &&
         echo "bucket acs-assets ready"
     restart: "no"
 

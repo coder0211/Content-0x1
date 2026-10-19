@@ -64,7 +64,15 @@ func (f *fixture) do(t *testing.T, actor kernel.Actor, method, path, body string
 	t.Helper()
 	root, api := httpx.NewRouter(httpx.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Authenticator: auth{actor}, Cookies: httpx.CookieConfig{SessionName: "s"}})
-	(&jobhttp.Handler{Svc: f.svc, Subscriber: f.sub}).Routes(api)
+	(&jobhttp.Handler{Svc: f.svc, Subscriber: f.sub, UserNames: func(_ context.Context, ids []kernel.ID) map[kernel.ID]string {
+		out := map[kernel.ID]string{}
+		for _, id := range ids {
+			if id == f.owner.UserID {
+				out[id] = "Người sáng tạo"
+			}
+		}
+		return out
+	}}).Routes(api)
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: "s", Value: "x"})
 	req.Header.Set(httpx.HeaderCSRF, "t")
@@ -111,7 +119,7 @@ func TestGetJobAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := env.Data
-	if d["job_type"] != "content_generation" || d["status"] != "queued" || d["error"] != nil || d["result"] != nil {
+	if d["job_type"] != "content_generation" || d["status"] != "queued" || d["error"] != nil || d["result"] != nil || d["created_by_name"] != "Người sáng tạo" {
 		t.Fatalf("body %v", d)
 	}
 	cost := d["cost"].(map[string]any)
@@ -127,7 +135,7 @@ func TestGetJobAccess(t *testing.T) {
 func TestListJobs(t *testing.T) {
 	f := newFixture(t)
 	rec := f.do(t, f.owner, "GET", "/api/v1/jobs?status=queued,running&type=content_generation&limit=10", "")
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), f.jobID.String()) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), f.jobID.String()) || !strings.Contains(rec.Body.String(), `"created_by_name":"Người sáng tạo"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	rec = f.do(t, testutil.Actor(kernel.RoleContentCreator), "GET", "/api/v1/jobs", "")

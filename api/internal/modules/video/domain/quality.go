@@ -65,11 +65,12 @@ func orNone(s string) string {
 // musicLicense is the subset of asset_files.license_json the video module
 // checks (ACS-023 records source, license type and validity).
 type musicLicense struct {
-	Source    string `json:"source"`
-	Type      string `json:"type"`
-	License   string `json:"license"`
-	ExpiresAt string `json:"expires_at"`
-	ValidTo   string `json:"valid_to"`
+	Source      string `json:"source"`
+	LicenseType string `json:"license_type"` // brand module's shape (brand/domain.License)
+	Type        string `json:"type"`
+	License     string `json:"license"`
+	ExpiresAt   string `json:"expires_at"`
+	ValidTo     string `json:"valid_to"`
 }
 
 // MusicLicensed reports whether a brand music asset may be used at now: it
@@ -83,7 +84,7 @@ func MusicLicensed(assetType string, license json.RawMessage, now time.Time) boo
 	if err := json.Unmarshal(license, &l); err != nil {
 		return false
 	}
-	if strings.TrimSpace(l.Source) == "" || (strings.TrimSpace(l.Type) == "" && strings.TrimSpace(l.License) == "") {
+	if strings.TrimSpace(l.Source) == "" || strings.TrimSpace(l.LicenseType+l.Type+l.License) == "" {
 		return false
 	}
 	for _, exp := range []string{l.ExpiresAt, l.ValidTo} {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,7 @@ import (
 	"github.com/be/acs/api/internal/platform/queue"
 	"github.com/be/acs/api/internal/platform/redis"
 	"github.com/be/acs/api/internal/ports"
+	"github.com/be/acs/api/internal/shared/kernel"
 )
 
 // Background loop periods (SPEC-02 §5.3).
@@ -92,7 +94,7 @@ func Register(c *registry.Container) (registry.Module, error) {
 	}
 	c.APIs.Jobs = svc
 	c.APIs.Steps = steps
-	return &Module{Steps: steps, Svc: svc, handler: &jobhttp.Handler{Svc: svc, Subscriber: c.Subscriber}, c: c}, nil
+	return &Module{Steps: steps, Svc: svc, handler: &jobhttp.Handler{Svc: svc, Subscriber: c.Subscriber, UserNames: userNames(apis)}, c: c}, nil
 }
 
 // Routes implements registry.HTTPModule.
@@ -128,4 +130,25 @@ func (m *Module) consume(ctx context.Context) error {
 	}
 	srv.Handle(usecase.TaskTypeStep, runtime.HandleTask(m.Svc, logger))
 	return srv.Run(ctx)
+}
+
+// userNames resolves creator names through the identity API (resolved
+// lazily: identity may register after job). Lookup errors leave names empty.
+func userNames(apis *registry.APIs) func(ctx context.Context, ids []kernel.ID) map[kernel.ID]string {
+	return func(ctx context.Context, ids []kernel.ID) map[kernel.ID]string {
+		out := map[kernel.ID]string{}
+		if apis.Identity == nil {
+			return out
+		}
+		uniq := slices.Clone(ids)
+		slices.SortFunc(uniq, func(a, b kernel.ID) int { return slices.Compare(a[:], b[:]) })
+		users, err := apis.Identity.GetUsers(ctx, slices.Compact(uniq))
+		if err != nil {
+			return out
+		}
+		for _, u := range users {
+			out[u.ID] = u.Name
+		}
+		return out
+	}
 }

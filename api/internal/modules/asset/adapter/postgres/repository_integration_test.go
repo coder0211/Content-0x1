@@ -120,17 +120,13 @@ func TestSearchPerformance10k(t *testing.T) {
 	w := setup(t)
 	ctx := context.Background()
 	_, err := w.pool.Exec(ctx, `
-		WITH a AS (
-			INSERT INTO content_assets (brand_id, asset_type, subtype, title, status, tags, created_by, created_at)
-			SELECT $1, (ARRAY['content','image','video'])[1 + g % 3], 'facebook_post',
-			       'Bài đăng ' || g || CASE WHEN g % 50 = 0 THEN ' ưu đãi hè' ELSE ' khóa học' END,
-			       (ARRAY['draft','pending_review','approved','changes_requested'])[1 + g % 4],
-			       ARRAY['tag' || (g % 20)], $2, now() - (g || ' minutes')::interval
-			FROM generate_series(1, 10000) g
-			RETURNING id, title
-		)
-		UPDATE content_assets c SET search_tsv = setweight(to_tsvector('simple', immutable_unaccent(a.title)), 'A')
-		FROM a WHERE c.id = a.id`, w.brandID, w.creator.UserID)
+		INSERT INTO content_assets (brand_id, asset_type, subtype, title, status, tags, created_by, created_at, search_tsv)
+		SELECT $1, (ARRAY['content','image','video'])[1 + g % 3], 'facebook_post', t.title,
+		       (ARRAY['draft','pending_review','approved','changes_requested'])[1 + g % 4],
+		       ARRAY['tag' || (g % 20)], $2, now() - (g || ' minutes')::interval,
+		       setweight(to_tsvector('simple', immutable_unaccent(t.title)), 'A')
+		FROM generate_series(1, 10000) g
+		CROSS JOIN LATERAL (SELECT 'Bài đăng ' || g || CASE WHEN g % 50 = 0 THEN ' ưu đãi hè' ELSE ' khóa học' END AS title) t`, w.brandID, w.creator.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +155,10 @@ func TestSearchPerformance10k(t *testing.T) {
 	if p95 > 500*time.Millisecond {
 		t.Fatalf("p95 %s > 500ms", p95)
 	}
-	p, _ := w.svc.Search(ctx, w.creator, usecase.SearchInput{Q: "uu dai", PageCursor: kernel.PageRequest{Limit: 100}})
+	p, err := w.svc.Search(ctx, w.creator, usecase.SearchInput{Q: "uu dai", PageCursor: kernel.PageRequest{Limit: 100}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(p.Items) != 100 || !slices.ContainsFunc(p.Items, func(s usecase.Summary) bool { return s.Asset.Title != "" }) {
 		t.Fatalf("uu dai hits %d", len(p.Items))
 	}

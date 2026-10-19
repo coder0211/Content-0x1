@@ -106,7 +106,19 @@ func (s *Service) present(ctx context.Context, b domain.Batch) (BatchView, error
 	if a.CurrentVersion != nil {
 		ba.CurrentVersionNo = a.CurrentVersion.VersionNo
 	}
-	images, err := s.versionImages(ctx, ver.Files)
+	files := ver.Files
+	if b.Operation == domain.OpVariation && ver.VersionNo > 1 {
+		// A variation version carries the previous images forward (the
+		// version is the full set); the batch shows only what it produced.
+		prev, err := s.Assets.GetVersion(ctx, a.ID, ver.VersionNo-1)
+		if err != nil && !errors.Is(err, kernel.ErrNotFound) {
+			return BatchView{}, err
+		}
+		if err == nil {
+			files = newFiles(ver.Files, prev.Files)
+		}
+	}
+	images, err := s.versionImages(ctx, files)
 	if err != nil {
 		return BatchView{}, err
 	}
@@ -161,4 +173,20 @@ func (s *Service) versionImages(ctx context.Context, vf []assetuc.VersionFile) (
 		out = append(out, img)
 	}
 	return out, nil
+}
+
+// newFiles returns the files of cur that are not in prev (with their
+// thumbnails, which are new files too).
+func newFiles(cur, prev []assetuc.VersionFile) []assetuc.VersionFile {
+	seen := make(map[kernel.ID]bool, len(prev))
+	for _, f := range prev {
+		seen[f.FileID] = true
+	}
+	out := make([]assetuc.VersionFile, 0, len(cur))
+	for _, f := range cur {
+		if !seen[f.FileID] {
+			out = append(out, f)
+		}
+	}
+	return out
 }

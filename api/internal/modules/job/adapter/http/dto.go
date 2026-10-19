@@ -41,6 +41,7 @@ type jobSummaryDTO struct {
 	Status              string     `json:"status"`
 	Progress            int        `json:"progress"`
 	CreatedBy           kernel.ID  `json:"created_by"`
+	CreatedByName       string     `json:"created_by_name"`
 	CampaignID          *kernel.ID `json:"campaign_id"`
 	AssetID             *kernel.ID `json:"asset_id"`
 	ProviderCode        *string    `json:"provider_code"`

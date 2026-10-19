@@ -74,6 +74,8 @@ export interface JobSummary {
   status: JobStatus;
   progress: number;
   createdBy: ID;
+  /** Creator display name ("" when unknown). */
+  createdByName: string;
   campaignId: ID | null;
   assetId: ID | null;
   providerCode: string | null;

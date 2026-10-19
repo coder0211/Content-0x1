@@ -3,6 +3,7 @@ import {
   filtersFromParams,
   filtersToParams,
   normalizeTags,
+  imageFiles,
   previewFile,
   requiresTypographyCheck,
   toggleStatus,
@@ -58,6 +59,17 @@ describe("library rules", () => {
     expect(previewFile([file({ fileId: "t", role: "thumbnail" }), file({ fileId: "p" })])?.fileId).toBe("p");
     expect(previewFile([file({ url: null })])).toBeNull();
     expect(previewFile([file({ kind: "subtitle", role: "subtitle" })])).toBeNull();
+    expect(previewFile([file({ fileId: "t", role: "thumbnail" }), file({ fileId: "v", role: "variant" })])?.fileId).toBe("v");
+  });
+
+  it("lists every full-size image of a version in order", () => {
+    const files = [
+      file({ fileId: "v2", role: "variant", sortOrder: 1 }),
+      file({ fileId: "t1", role: "thumbnail", sortOrder: 0 }),
+      file({ fileId: "v1", role: "variant", sortOrder: 0 }),
+      file({ fileId: "x", role: "variant", sortOrder: 2, url: null }),
+    ];
+    expect(imageFiles(files).map((f) => f.fileId)).toEqual(["v1", "v2"]);
   });
 
   it("extracts version text per type", () => {

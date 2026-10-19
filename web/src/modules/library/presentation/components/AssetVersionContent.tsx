@@ -1,5 +1,5 @@
 import { cn } from "@/shared/lib/cn";
-import { previewFile, type AssetType, type AssetVersion } from "../../domain/asset";
+import { imageFiles, previewFile, type AssetType, type AssetVersion } from "../../domain/asset";
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
@@ -17,6 +17,8 @@ export function AssetVersionContent({
 }) {
   const c = version.content;
   const media = previewFile(version.files);
+  // An image version can hold several images (count > 1, variations): show them all.
+  const images = type === "image" ? imageFiles(version.files) : [];
 
   if (type === "content") {
     const hashtags = Array.isArray(c.hashtags) ? c.hashtags.filter((h): h is string => typeof h === "string") : [];
@@ -45,7 +47,15 @@ export function AssetVersionContent({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {media ? (
+      {images.length > 1 ? (
+        <ul aria-label={`${images.length} ảnh trong phiên bản`} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {images.map((f, i) => (
+            <li key={f.fileId} className="flex justify-center rounded border border-neutral-200 bg-neutral-100">
+              <img src={f.url ?? undefined} alt={`${title} — ảnh ${i + 1}`} className="max-h-[240px] object-contain" />
+            </li>
+          ))}
+        </ul>
+      ) : media ? (
         media.kind === "video" ? (
           <div className="flex justify-center rounded bg-video-bg">
             <video src={media.url ?? undefined} controls className="max-h-[480px]" aria-label={title} />

@@ -99,3 +99,36 @@ func TestHardenRestrictsInputProtocols(t *testing.T) {
 		t.Fatal("ffprobe must whitelist protocols")
 	}
 }
+
+func TestRenderFallsBackToSoftSubtitlesWithoutLibass(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		filters  string
+		wantSoft bool
+	}{
+		{"no libass", " .. null  V->V  Pass the source unchanged.\n TS xfade  VV->V  Cross fade.\n", true},
+		{"libass", " .. subtitles  V->V  Render text subtitles onto input video using the libass library.\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var renderArgs []string
+			r := &Renderer{Bin: "ffmpeg", Run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				if len(args) == 2 && args[1] == "-filters" {
+					return []byte("Filters:\n  T.. = Timeline support\n  ------\n" + tc.filters), nil
+				}
+				renderArgs = args
+				return nil, nil
+			}}
+			res, err := r.Render(context.Background(), ports.RenderSpec{
+				Clips: []string{"/w/a.mp4"}, Subtitles: "/w/subs.ass", BurnIn: true,
+				Format: ports.OutputFormat{Width: 360, Height: 640, FPS: 30}, Output: "/w/out.mp4",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(renderArgs, " ")
+			if res.SubtitlesSoftFallback != tc.wantSoft || strings.Contains(joined, "subtitles=") == tc.wantSoft || strings.Contains(joined, "mov_text") != tc.wantSoft {
+				t.Fatalf("soft=%v args=%s", res.SubtitlesSoftFallback, joined)
+			}
+		})
+	}
+}

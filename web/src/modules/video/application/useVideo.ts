@@ -46,6 +46,15 @@ export function useMusicTracks(brandId: ID | null) {
   });
 }
 
+export function useCampaignBrandId(campaignId: ID | null) {
+  const repo = useRepository("video");
+  return useQuery({
+    queryKey: videoKeys.campaignBrand(campaignId ?? ""),
+    queryFn: () => repo.getCampaignBrandId(campaignId as ID),
+    enabled: !!campaignId,
+  });
+}
+
 export function useCreateVideo() {
   const repo = useRepository("video");
   return useMutation({

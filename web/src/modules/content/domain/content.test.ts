@@ -82,5 +82,6 @@ describe("content domain", () => {
 
   it("builds the Video Studio link", () => {
     expect(videoStudioLink("abc")).toBe("/videos?script_from_asset_id=abc");
+    expect(videoStudioLink("abc", "c1")).toBe("/videos?script_from_asset_id=abc&campaign_id=c1");
   });
 });

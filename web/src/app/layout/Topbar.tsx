@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import { Link, useMatches } from "react-router";
-import { Bell, ChevronRight, LogOut, Search } from "lucide-react";
+import { ChevronRight, LogOut, Search } from "lucide-react";
+import { NotificationBell } from "@/modules/dashboard";
 import { ROLE_LABELS } from "@/shared/lib/labels";
 import type { RouteHandle } from "@/shared/lib/module";
 import { useSession } from "@/shared/lib/session";
@@ -57,11 +58,7 @@ export function Topbar() {
           </Button>
         </span>
       </Tooltip>
-      <Tooltip content="Thông báo">
-        <Button variant="ghost" size="icon" aria-label="Thông báo">
-          <Bell />
-        </Button>
-      </Tooltip>
+      {user ? <NotificationBell /> : null}
       {user ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

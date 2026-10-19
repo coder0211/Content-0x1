@@ -70,7 +70,7 @@ export default function JobsPage() {
     { id: "progress", header: "Tiến độ", align: "right", width: 80, cell: (j) => `${j.progress}%` },
     { id: "provider", header: "Nhà cung cấp", cell: (j) => <span className="text-neutral-700">{providerText(j)}</span> },
     ...(canSeeAll
-      ? [{ id: "user", header: "Người tạo", cell: (j: JobSummary) => creatorText(j.createdBy, user?.id) } satisfies DataTableColumn<JobSummary>]
+      ? [{ id: "user", header: "Người tạo", cell: (j: JobSummary) => creatorText(j, user?.id) } satisfies DataTableColumn<JobSummary>]
       : []),
     { id: "cost", header: "Chi phí", align: "right", cell: (j) => <JobCostCell cost={j.cost} /> },
     {

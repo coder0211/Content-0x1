@@ -1,4 +1,5 @@
 import type { CampaignStatus, JobStatus } from "@/shared/kernel";
+import type { AppNotification } from "../domain/notification";
 import type { DashboardSummary } from "../domain/summary";
 
 export interface DashboardSummaryDto {
@@ -45,4 +46,17 @@ export function toSummary(d: DashboardSummaryDto): DashboardSummary {
       : null,
     generatedAt: d.generated_at,
   };
+}
+
+/** GET /notifications item (api/openapi/audit.yaml Notification). */
+export interface NotificationDto {
+  id: string;
+  type: string;
+  payload: Record<string, unknown> | null;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export function toNotification(d: NotificationDto): AppNotification {
+  return { id: d.id, type: d.type, payload: d.payload ?? {}, readAt: d.read_at ?? null, createdAt: d.created_at };
 }

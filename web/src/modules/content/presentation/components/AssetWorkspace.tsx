@@ -451,7 +451,7 @@ function Workspace({
             </DropdownMenu>
             <Button
               variant="secondary"
-              onClick={() => void navigate(videoStudioLink(asset.id))}
+              onClick={() => void navigate(videoStudioLink(asset.id, asset.campaignId))}
             >
               <Clapperboard aria-hidden />
               Gửi sang Video Studio

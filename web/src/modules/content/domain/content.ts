@@ -352,7 +352,9 @@ export function isTerminal(status: JobStatus): boolean {
   );
 }
 
-/** Video Studio deep link ("Gửi sang Video Studio"). */
-export function videoStudioLink(assetId: ID): string {
-  return `/videos?script_from_asset_id=${encodeURIComponent(assetId)}`;
+/** Video Studio deep link ("Gửi sang Video Studio"); keeps the script's campaign so the video joins it. */
+export function videoStudioLink(assetId: ID, campaignId?: ID | null): string {
+  const q = new URLSearchParams({ script_from_asset_id: assetId });
+  if (campaignId) q.set("campaign_id", campaignId);
+  return `/videos?${q.toString()}`;
 }

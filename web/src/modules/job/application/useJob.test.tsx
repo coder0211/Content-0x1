@@ -15,6 +15,7 @@ function makeJob(over: Partial<Job> = {}): Job {
     status: "running",
     progress: 0,
     createdBy: "u1",
+    createdByName: "",
     campaignId: null,
     assetId: null,
     providerCode: "fake",

@@ -15,4 +15,6 @@ export const navItems: NavItem[] = [
   { to: "/", label: "Tổng quan", icon: LayoutDashboard, group: "work", order: 10 },
 ];
 
+export { NotificationBell } from "./presentation/components/NotificationBell";
+
 export const repositories: RepositoryFactories = { dashboard: () => new HttpDashboardRepository() };

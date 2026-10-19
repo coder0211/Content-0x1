@@ -6,7 +6,8 @@ export function providerText(j: Pick<JobSummary, "providerCode" | "modelCode">):
   return j.modelCode ? `${j.providerCode} · ${j.modelCode}` : j.providerCode;
 }
 
-/** Creator cell: "Bạn" for the viewer, else a short id (no users API in this module). */
-export function creatorText(createdBy: string, currentUserId: string | undefined): string {
-  return createdBy === currentUserId ? "Bạn" : createdBy.slice(0, 8);
+/** Creator cell: "Bạn" for the viewer, else the creator's name (short id when unknown). */
+export function creatorText(j: Pick<JobSummary, "createdBy" | "createdByName">, currentUserId: string | undefined): string {
+  if (j.createdBy === currentUserId) return "Bạn";
+  return j.createdByName || j.createdBy.slice(0, 8);
 }

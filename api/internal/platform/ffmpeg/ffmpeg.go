@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/be/acs/api/internal/ports"
@@ -146,6 +147,9 @@ func parseRate(r string) float64 {
 type Renderer struct {
 	Bin string
 	Run Runner
+
+	filtersOnce sync.Once
+	filters     map[string]bool // nil: unknown (listing failed) → assume available
 }
 
 // NewRenderer returns a Renderer for the ffmpeg binary.
@@ -357,8 +361,16 @@ func RenderArgs(s ports.RenderSpec) ([]string, error) {
 	return append(args, s.Output), nil
 }
 
-// Render produces the final MP4 and probes its duration.
+// Render produces the final MP4 and probes its duration. Burn-in subtitles
+// need the libass "subtitles" filter; on an FFmpeg build without it the
+// subtitles are muxed as a soft track rather than failing the whole job
+// after every clip has been paid for.
 func (r *Renderer) Render(ctx context.Context, s ports.RenderSpec) (ports.RenderResult, error) {
+	res := ports.RenderResult{Output: s.Output}
+	if s.Subtitles != "" && s.BurnIn && !r.HasFilter(ctx, "subtitles") {
+		s.BurnIn = false
+		res.SubtitlesSoftFallback = true
+	}
 	args, err := RenderArgs(s)
 	if err != nil {
 		return ports.RenderResult{}, err
@@ -366,7 +378,36 @@ func (r *Renderer) Render(ctx context.Context, s ports.RenderSpec) (ports.Render
 	if _, err := r.Run(ctx, r.Bin, Harden(args)...); err != nil {
 		return ports.RenderResult{}, err
 	}
-	return ports.RenderResult{Output: s.Output}, nil
+	return res, nil
+}
+
+// HasFilter reports whether the FFmpeg build has the named filter (listed
+// once per Renderer). When the listing fails it assumes the filter exists.
+func (r *Renderer) HasFilter(ctx context.Context, name string) bool {
+	r.filtersOnce.Do(func() {
+		out, err := r.Run(ctx, r.Bin, "-hide_banner", "-filters")
+		if err != nil {
+			return
+		}
+		r.filters = ParseFilters(out)
+	})
+	if r.filters == nil {
+		return true
+	}
+	return r.filters[name]
+}
+
+// ParseFilters extracts filter names from `ffmpeg -filters` output
+// (lines like " TS subtitles  V->V  Render text subtitles…").
+func ParseFilters(out []byte) map[string]bool {
+	m := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 3 && strings.Contains(f[2], "->") {
+			m[f[1]] = true
+		}
+	}
+	return m
 }
 
 // ThumbnailArgs extracts one JPEG frame at `at`.

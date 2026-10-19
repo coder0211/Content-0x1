@@ -174,7 +174,7 @@ export default function JobDetailPage() {
         <Field label="Chi phí">
           <JobCostCell cost={job.cost} />
         </Field>
-        <Field label="Người tạo">{creatorText(job.createdBy, user?.id)}</Field>
+        <Field label="Người tạo">{creatorText(job, user?.id)}</Field>
         <Field label="Tạo lúc">
           <span className="tabular">{formatDateTime(job.createdAt)}</span>
         </Field>

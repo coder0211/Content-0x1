@@ -215,14 +215,21 @@ export function normalizeTags(input: string | string[]): string[] {
   return out.slice(0, 20);
 }
 
-/** File to preview for a version: thumbnail → preview → primary → first with a URL. */
+/** File to preview for a version: primary → preview → first variant → thumbnail → first with a URL. */
 export function previewFile(files: VersionFile[]): VersionFile | null {
   const withUrl = files.filter((f) => f.url);
-  for (const role of ["primary", "preview", "thumbnail"] as const) {
+  for (const role of ["primary", "preview", "variant", "thumbnail"] as const) {
     const hit = withUrl.find((f) => f.role === role && (f.kind === "image" || f.kind === "video"));
     if (hit) return hit;
   }
   return withUrl.find((f) => f.kind === "image" || f.kind === "video") ?? null;
+}
+
+/** Full-size images of an image version (primary + variants, in order); thumbnails are not repeated. */
+export function imageFiles(files: VersionFile[]): VersionFile[] {
+  return files
+    .filter((f) => f.url && f.kind === "image" && (f.role === "primary" || f.role === "variant"))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");

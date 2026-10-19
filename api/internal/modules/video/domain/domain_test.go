@@ -293,6 +293,9 @@ func TestMusicLicensed(t *testing.T) {
 		want bool
 	}{
 		{"music", lic(`{"source":"Artlist","type":"commercial"}`), true},
+		// The brand module stores license_type (brand/domain.License).
+		{"music", lic(`{"source":"Artlist","license_type":"commercial","expires_at":"2027-12-31"}`), true},
+		{"music", lic(`{"source":"Artlist","license_type":"commercial","expires_at":"2026-10-18"}`), false},
 		{"music", lic(`{"source":"Artlist","license":"CC-BY","expires_at":"2027-01-01"}`), true},
 		{"music", lic(`{"source":"Artlist","type":"commercial","expires_at":"2026-10-01T00:00:00Z"}`), false},
 		{"music", lic(`{"type":"commercial"}`), false},
