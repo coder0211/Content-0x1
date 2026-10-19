@@ -4,7 +4,9 @@ import { server } from "@/app/mocks/server";
 import { resetBrandMocks } from "@/modules/brand/infrastructure/mocks";
 import { api, fail, mockSession, page, rest } from "@/shared/api/mock";
 import { renderApp } from "@/test/render";
-import { MOCK_CAMPAIGN_ID, MOCK_DRAFT_CAMPAIGN_ID, resetCampaignMocks } from "../../infrastructure/mocks";
+import { MOCK_CAMPAIGN_ID, MOCK_DRAFT_CAMPAIGN_ID, resetCampaignMocks, setCampaignMockPlanStepMs } from "../../infrastructure/mocks";
+
+beforeEach(() => setCampaignMockPlanStepMs(0));
 
 afterEach(() => {
   resetCampaignMocks();
@@ -86,10 +88,15 @@ describe("Campaign detail", () => {
   it("links 'Tạo mới' to the studio with the campaign preselected (ACS-026 AC)", async () => {
     mockSession.signInAs("creator@acs.local");
     renderApp(`/campaigns/${MOCK_CAMPAIGN_ID}?tab=images`);
-    expect(await screen.findByRole("cell", { name: "Poster ưu đãi 20%" })).toBeInTheDocument();
+    // Assets come from the library module's /assets mock (shared asset store seed).
+    expect(await screen.findByRole("cell", { name: "Poster khuyến mãi Tết 20%" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Tạo mới/ })).toHaveAttribute("href", `/images?campaign_id=${MOCK_CAMPAIGN_ID}`);
     const user = userEvent.setup();
     await user.click(screen.getByRole("tab", { name: "Video" }));
+    expect(await screen.findByRole("cell", { name: "Video TikTok: Mở hộp bánh Tết" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Tạo mới/ })).toHaveAttribute("href", `/videos?campaign_id=${MOCK_CAMPAIGN_ID}`);
+    server.use(rest.get(api("/assets"), () => page([])));
+    renderApp(`/campaigns/${MOCK_CAMPAIGN_ID}?tab=videos`);
     expect(await screen.findByText("Campaign chưa có video nào.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tạo video" })).toHaveAttribute("href", `/videos?campaign_id=${MOCK_CAMPAIGN_ID}`);
   });

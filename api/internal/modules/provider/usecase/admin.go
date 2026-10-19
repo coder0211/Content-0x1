@@ -397,6 +397,12 @@ func (s *Service) AddPricingVersion(ctx context.Context, actor kernel.Actor, mod
 	from := now
 	if in.EffectiveFrom != nil {
 		from = in.EffectiveFrom.UTC()
+		// A start earlier today (e.g. the UI's date-only "today" = 00:00
+		// Vietnam time) means "effective now": prices never apply
+		// retroactively to usage already recorded. Earlier days are rejected.
+		if from.Before(now) && !from.Before(startOfBusinessDay(now)) {
+			from = now
+		}
 		if from.Before(now.Add(-5 * time.Minute)) {
 			return PricingVersion{}, kernel.Validation(kernel.FieldIssue("effective_from", "in_past"))
 		}
@@ -449,4 +455,10 @@ func (s *Service) AddPricingVersion(ctx context.Context, actor kernel.Actor, mod
 			"effective_from": from.Format(time.RFC3339), "unit_prices": items})
 	})
 	return out, err
+}
+
+// startOfBusinessDay is 00:00 of t's day in Vietnam time (UTC+7), in UTC.
+func startOfBusinessDay(t time.Time) time.Time {
+	vn := t.In(time.FixedZone("ICT", 7*3600))
+	return time.Date(vn.Year(), vn.Month(), vn.Day(), 0, 0, 0, 0, vn.Location()).UTC()
 }

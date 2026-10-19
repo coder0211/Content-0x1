@@ -357,6 +357,22 @@ func TestContentPlanSavesProposal(t *testing.T) {
 	if res.JobResult["plan"] == nil || !strings.Contains(string(e.campaigns.Proposals[cid]), "Kế hoạch") {
 		t.Fatalf("%v", res.JobResult)
 	}
+	// The proposal follows the campaign plan contract (campaign/domain.Plan).
+	var p struct {
+		Summary string   `json:"summary"`
+		Themes  []string `json:"themes"`
+		Items   []struct {
+			ID, Topic, Angle, Channel, Format string
+			PublishDate                       string `json:"publish_date"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(e.campaigns.Proposals[cid], &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Themes) != 1 || p.Themes[0] != "A" || len(p.Items) != 1 || p.Items[0].Topic != "z" || p.Items[0].Format != "facebook_post" ||
+		p.Items[0].PublishDate != "2026-11-01" || p.Items[0].ID != "item-1" || !strings.Contains(p.Summary, "facebook_post × 5") {
+		t.Fatalf("%+v", p)
+	}
 }
 
 // ACS-052 AC: suggested prompts use the brand colors/tone.

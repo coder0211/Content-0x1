@@ -1,10 +1,11 @@
 import type { HttpHandler } from "msw";
-import { accepted, api, fail, mockSession, MOCK_USERS, noContent, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { accepted, api, fail, MOCK_USERS, noContent, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { createMockJob } from "@/shared/api/mock-jobs";
 import type { ApiErrorDetail, CampaignStatus } from "@/shared/kernel";
 import { uuid } from "@/shared/lib/id";
 import { canEditCampaign, validateBrief, validateHeader, validatePlan } from "../domain/rules";
-import type { CampaignAssetType, CampaignGoal } from "../domain/types";
-import { fromPlan, toBrief, toPlan, type AssetRowDto, type CampaignBriefDto, type CampaignDto, type ContentPlanDto, type JobDto } from "./dto";
+import type { CampaignGoal } from "../domain/types";
+import { fromPlan, toBrief, toPlan, type CampaignBriefDto, type CampaignDto, type ContentPlanDto } from "./dto";
 
 /** Same ids as the brand mocks (modules/brand/infrastructure/mocks.ts). */
 const MOCK_BRAND_ID = "10000000-0000-4000-8000-000000000001";
@@ -26,9 +27,13 @@ const TRANSITIONS: Record<CampaignStatus, CampaignStatus[]> = {
 
 const store = {
   campaigns: new Map<string, Row>(),
-  assets: [] as (AssetRowDto & { campaign_id: string })[],
-  jobs: new Map<string, JobDto>(),
 };
+
+/** Duration of the simulated content_plan job (0 = done on the next read, for tests). */
+let planStepMs = 800;
+export function setCampaignMockPlanStepMs(ms: number): void {
+  planStepMs = ms;
+}
 
 function seed() {
   const now = "2026-10-05T03:00:00Z";
@@ -91,16 +96,11 @@ function seed() {
     created_at: now,
     updated_at: now,
   });
-  store.assets.push(
-    { id: uuid(), campaign_id: MOCK_CAMPAIGN_ID, asset_type: "content", title: "3 lý do bạn ngại nói tiếng Anh", status: "approved", created_at: now, updated_at: now },
-    { id: uuid(), campaign_id: MOCK_CAMPAIGN_ID, asset_type: "image", title: "Poster ưu đãi 20%", status: "pending_review", created_at: now, updated_at: now },
-  );
 }
 
 export function resetCampaignMocks(): void {
   store.campaigns.clear();
-  store.assets.length = 0;
-  store.jobs.clear();
+  planStepMs = 800;
   seed();
 }
 seed();
@@ -286,33 +286,32 @@ export const handlers: HttpHandler[] = [
       return noContent();
     }),
   ),
-  // Endpoint owned by the content module (SPEC-04 §2.3); mocked here so the campaign UI works standalone.
+  // Endpoint owned by the content module (SPEC-04 §2.3). It is mocked here because the job's only
+  // effect is campaigns.content_plan_proposal (CampaignAPI.SaveContentPlanProposal on the backend),
+  // which lives in this store. The job itself is in the shared job store (served by the job mocks).
   rest.post(
     api("/campaigns/:id/plan-generations"),
-    withAuth("generate.run", ({ params }) => {
+    withAuth("generate.run", ({ params, request, user }) => {
+      const key = request.headers.get("Idempotency-Key");
+      if (!key) return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
       const r = store.campaigns.get(String(params.id));
       if (!r) return notFound();
       if (r.status === "completed" || r.status === "archived") return fail(409, "INVALID_STATE_TRANSITION", "Campaign không nhận việc mới");
-      const jobId = uuid();
-      store.jobs.set(jobId, { id: jobId, status: "succeeded", progress: 100, error: null });
-      store.campaigns.set(r.id, { ...r, content_plan_proposal: proposalFor(r), content_plan_proposed_at: new Date().toISOString() });
-      return accepted({ job_id: jobId, status: "queued", estimated_cost: { amount: 0.02, currency: "USD" } });
+      const job = createMockJob({
+        type: "content_plan",
+        createdBy: user.id,
+        idempotencyKey: key,
+        campaignId: r.id,
+        estimate: 0.02,
+        steps: [["plan", "content_plan"]],
+        simulate: { stepMs: planStepMs },
+        onSucceeded: () => {
+          const cur = store.campaigns.get(r.id) ?? r;
+          store.campaigns.set(r.id, { ...cur, content_plan_proposal: proposalFor(cur), content_plan_proposed_at: new Date().toISOString() });
+          return { campaign_id: r.id };
+        },
+      });
+      return accepted({ job_id: job.id, status: "queued", estimated_cost: { amount: 0.02, currency: "USD", is_estimate: true } });
     }),
   ),
-  // Only jobs created above; anything else falls through to the job module's mocks.
-  rest.get(api("/jobs/:id"), ({ params }) => {
-    const j = store.jobs.get(String(params.id));
-    if (!j) return undefined;
-    if (!mockSession.get()) return fail(401, "UNAUTHENTICATED", "Chưa đăng nhập");
-    return ok({ ...j, job_type: "content_plan" });
-  }),
-  // Library list scoped to a campaign (owned by the library module); other queries fall through.
-  rest.get(api("/assets"), ({ request }) => {
-    const u = new URL(request.url);
-    const campaignId = u.searchParams.get("campaign_id");
-    if (!campaignId || !store.campaigns.has(campaignId)) return undefined;
-    if (!mockSession.get()) return fail(401, "UNAUTHENTICATED", "Chưa đăng nhập");
-    const type = u.searchParams.get("type") as CampaignAssetType | null;
-    return page(store.assets.filter((a) => a.campaign_id === campaignId && (!type || a.asset_type === type)).map(({ campaign_id: _c, ...a }) => a));
-  }),
 ];

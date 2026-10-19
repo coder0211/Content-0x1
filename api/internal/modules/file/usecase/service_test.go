@@ -48,6 +48,9 @@ func (m *memRepo) MarkReady(_ context.Context, id kernel.ID, v usecase.Verified)
 	f := m.files[id]
 	f.UploadStatus, f.MimeType, f.Kind, f.SizeBytes, f.ChecksumSHA256 = domain.StatusReady, v.MimeType, v.Kind, v.SizeBytes, v.Checksum
 	f.Width, f.Height, f.DurationMs = v.Width, v.Height, v.DurationMs
+	if v.StorageKey != "" {
+		f.StorageKey = v.StorageKey
+	}
 	return nil
 }
 func (m *memRepo) MarkRejected(_ context.Context, id kernel.ID, _ string) error {
@@ -118,6 +121,70 @@ func TestCompletePNG(t *testing.T) {
 }
 
 // ACS-024 AC: an .exe renamed to .png → 415 and the object is deleted.
+// ACS-101: bytes PUT again to the still-valid presigned URL after
+// /complete never reach readers: the verified copy lives under a new key
+// and the upload key is deleted.
+func TestCompletePinsVerifiedBytes(t *testing.T) {
+	s, _, store, _ := newService(nil)
+	actor := testutil.Actor(kernel.RoleContentCreator)
+	good := pngBytes(t, 8, 8)
+	tk := upload(t, s, store, actor, "image/png", domain.PurposeReferenceImage, good)
+	pending, _ := s.Get(context.Background(), tk.FileID)
+	f, err := s.CompleteUpload(context.Background(), actor, tk.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.StorageKey == pending.StorageKey || !strings.HasPrefix(f.StorageKey, "files/") {
+		t.Fatalf("verified bytes must move to a final key: %s", f.StorageKey)
+	}
+	if _, ok := store.Objects[pending.StorageKey]; ok {
+		t.Fatal("upload key must be deleted after verification")
+	}
+	// Attacker re-PUTs different bytes of the same length to the upload URL.
+	evil := bytes.Repeat([]byte{'A'}, len(good))
+	_ = store.Put(context.Background(), pending.StorageKey, bytes.NewReader(evil), int64(len(evil)), "image/png")
+	rc, _, err := s.Open(context.Background(), f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if !bytes.Equal(got, good) {
+		t.Fatal("reader got bytes that were never verified")
+	}
+}
+
+// ACS-101: decompression bomb (huge declared canvas) → 413, object deleted.
+func TestCompleteRejectsOversizedImageDimensions(t *testing.T) {
+	s, repo, store, _ := newService(nil)
+	actor := testutil.Actor(kernel.RoleContentCreator)
+	tk := upload(t, s, store, actor, "image/png", domain.PurposeReferenceImage, pngBytes(t, usecase.MaxImageSide+1, 2))
+	if _, err := s.CompleteUpload(context.Background(), actor, tk.FileID); !errors.Is(err, kernel.ErrFileTooLarge) {
+		t.Fatalf("got %v", err)
+	}
+	if repo.files[tk.FileID].UploadStatus != domain.StatusRejected {
+		t.Fatal("must be rejected")
+	}
+}
+
+// ACS-101: SVG is always signed as an attachment (no inline script on the
+// storage origin), other images stay inline.
+func TestSignedURLForcesAttachmentForSVG(t *testing.T) {
+	s, _, store, _ := newService(nil)
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
+	f, err := s.Store(context.Background(), usecase.StoreInput{Body: bytes.NewReader(svg), Size: int64(len(svg)), MimeType: "image/svg+xml",
+		Kind: domain.KindImage, Source: domain.SourceGenerated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SignedURL(context.Background(), f.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.LastGet.DownloadName; got != f.ID.String()+".svg" {
+		t.Fatalf("svg download name %q", got)
+	}
+}
+
 func TestCompleteRejectsDisguisedExecutable(t *testing.T) {
 	s, repo, store, _ := newService(nil)
 	actor := testutil.Actor(kernel.RoleContentCreator)

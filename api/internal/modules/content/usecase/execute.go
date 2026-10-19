@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	assetuc "github.com/be/acs/api/internal/modules/asset/usecase"
 	budgetuc "github.com/be/acs/api/internal/modules/budget/usecase"
@@ -195,7 +197,7 @@ func (s *Service) saveVariants(ctx context.Context, sc jobuc.StepContext, job jo
 				}
 				ref, err = s.Assets.AddVersion(ctx, *in.SourceAssetID, nv)
 			} else {
-				title := v.Title
+				title := strings.TrimSpace(v.Title)
 				if title == "" {
 					title = domain.FallbackTitle(domain.Format(in.Format), i)
 				}
@@ -228,21 +230,127 @@ func (s *Service) saveVariants(ctx context.Context, sc jobuc.StepContext, job jo
 	}, nil
 }
 
-// savePlan stores the plan as a proposal on the campaign.
-func (s *Service) savePlan(ctx context.Context, job jobuc.JobInfo, raw json.RawMessage) (jobuc.StepResult, error) {
-	var plan struct {
-		Summary      string           `json:"summary"`
-		Themes       []map[string]any `json:"themes"`
-		Schedule     []map[string]any `json:"schedule"`
-		Deliverables []map[string]any `json:"deliverables"`
+// aiPlan is the content_plan output schema (prompt.planSchema).
+type aiPlan struct {
+	Summary string `json:"summary"`
+	Themes  []struct {
+		Title      string `json:"title"`
+		Angle      string `json:"angle"`
+		KeyMessage string `json:"key_message"`
+	} `json:"themes"`
+	Schedule []struct {
+		Date    string `json:"date"`
+		Channel string `json:"channel"`
+		Format  string `json:"format"`
+		Theme   string `json:"theme"`
+		Idea    string `json:"idea"`
+	} `json:"schedule"`
+	Deliverables []struct {
+		Format string `json:"format"`
+		Count  int    `json:"count"`
+		Notes  string `json:"notes"`
+	} `json:"deliverables"`
+}
+
+// campaignPlan is the campaign module's plan shape (campaigns.content_plan):
+// {"summary", "themes": [string], "items": [{topic, angle, channel, format, publish_date, notes}]}.
+type campaignPlan struct {
+	Summary string             `json:"summary"`
+	Themes  []string           `json:"themes"`
+	Items   []campaignPlanItem `json:"items"`
+}
+
+type campaignPlanItem struct {
+	ID          string `json:"id"`
+	Topic       string `json:"topic"`
+	Angle       string `json:"angle"`
+	Channel     string `json:"channel"`
+	Format      string `json:"format"`
+	PublishDate string `json:"publish_date"`
+	Notes       string `json:"notes"`
+	Done        bool   `json:"done"`
+}
+
+var nonSlug = regexp.MustCompile(`[^a-z0-9_]+`)
+
+// planSlug turns a model-provided channel/format into the campaign slug
+// format ^[a-z0-9_]{1,40}$ ("Facebook Post" → "facebook_post").
+func planSlug(s string) string {
+	s = strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(strings.TrimSpace(s)), "_"), "_")
+	if len(s) > 40 {
+		s = strings.Trim(s[:40], "_")
 	}
-	if err := json.Unmarshal(raw, &plan); err != nil || (len(plan.Themes) == 0 && len(plan.Schedule) == 0) {
+	return s
+}
+
+// toCampaignPlan maps the AI plan onto the campaign plan contract: theme
+// titles become themes, schedule rows become checklist items (idea → topic,
+// theme + angle → angle, invalid dates moved to notes), deliverables are
+// summarised in the summary.
+func toCampaignPlan(p aiPlan) campaignPlan {
+	out := campaignPlan{Summary: strings.TrimSpace(p.Summary), Themes: []string{}, Items: []campaignPlanItem{}}
+	angles := map[string]string{}
+	for _, t := range p.Themes {
+		title := strings.TrimSpace(t.Title)
+		if title == "" {
+			continue
+		}
+		out.Themes = append(out.Themes, title)
+		angles[strings.ToLower(title)] = strings.TrimSpace(t.Angle)
+	}
+	for i, r := range p.Schedule {
+		topic := strings.TrimSpace(r.Idea)
+		if topic == "" {
+			topic = strings.TrimSpace(r.Theme)
+		}
+		if topic == "" {
+			continue
+		}
+		angle := strings.TrimSpace(r.Theme)
+		if a := angles[strings.ToLower(angle)]; a != "" {
+			angle += " — " + a
+		}
+		format := planSlug(r.Format)
+		if format == "" {
+			format = "post"
+		}
+		it := campaignPlanItem{ID: fmt.Sprintf("item-%d", i+1), Topic: topic, Angle: angle, Channel: planSlug(r.Channel), Format: format}
+		if d := strings.TrimSpace(r.Date); d != "" {
+			if _, err := time.Parse(time.DateOnly, d); err == nil {
+				it.PublishDate = d
+			} else {
+				it.Notes = "Thời gian: " + d
+			}
+		}
+		out.Items = append(out.Items, it)
+	}
+	var del []string
+	for _, d := range p.Deliverables {
+		if f := strings.TrimSpace(d.Format); f != "" && d.Count > 0 {
+			del = append(del, fmt.Sprintf("%s × %d", f, d.Count))
+		}
+	}
+	if len(del) > 0 {
+		line := "Đầu ra: " + strings.Join(del, ", ")
+		if out.Summary == "" {
+			out.Summary = line
+		} else {
+			out.Summary += "\n" + line
+		}
+	}
+	return out
+}
+
+// savePlan stores the plan as a proposal on the campaign, in the campaign
+// module's plan shape (campaign/domain.Plan).
+func (s *Service) savePlan(ctx context.Context, job jobuc.JobInfo, raw json.RawMessage) (jobuc.StepResult, error) {
+	var ai aiPlan
+	if err := json.Unmarshal(raw, &ai); err != nil {
 		return jobuc.StepResult{}, invalidOutput(job.ProviderCode, "output is not a content plan")
 	}
-	for _, l := range []*[]map[string]any{&plan.Themes, &plan.Schedule, &plan.Deliverables} {
-		if *l == nil {
-			*l = []map[string]any{}
-		}
+	plan := toCampaignPlan(ai)
+	if len(plan.Items) == 0 {
+		return jobuc.StepResult{}, invalidOutput(job.ProviderCode, "output is not a content plan")
 	}
 	body, err := json.Marshal(plan)
 	if err != nil {

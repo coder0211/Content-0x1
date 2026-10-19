@@ -70,6 +70,8 @@ export interface PricingRow {
   currency: string;
   effectiveFrom: ISODateTime;
   effectiveTo: ISODateTime | null;
+  /** Server-computed `is_current` (effective now); falls back to `effectiveTo === null`. */
+  isCurrent?: boolean;
 }
 
 export interface PricingVersion {
@@ -107,7 +109,7 @@ export function groupPricing(rows: PricingRow[]): PricingVersion[] {
         effectiveTo: first.effectiveTo,
         currency: first.currency,
         rows: [...list].sort((a, b) => a.unit.localeCompare(b.unit)),
-        current: list.every((r) => r.effectiveTo === null),
+        current: list.every((r) => r.isCurrent ?? r.effectiveTo === null),
       };
     })
     .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom));

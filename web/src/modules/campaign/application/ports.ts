@@ -1,5 +1,5 @@
 import type { CampaignStatus, ID, Page } from "@/shared/kernel";
-import type { Campaign, CampaignAsset, CampaignAssetType, CampaignBrief, CampaignGoal, CampaignMember, ContentPlan, PlanJob } from "../domain/types";
+import type { Campaign, CampaignAsset, CampaignAssetType, CampaignBrief, CampaignGoal, CampaignMember, ContentPlan } from "../domain/types";
 
 export interface CampaignQuery {
   brandId?: ID;
@@ -42,7 +42,6 @@ export interface CampaignRepository {
   discardProposal(id: ID): Promise<void>;
   /** POST /campaigns/{id}/plan-generations (served by the content module) → job id. */
   generatePlan(id: ID, idempotencyKey: string): Promise<{ jobId: ID }>;
-  job(jobId: ID): Promise<PlanJob>;
   /** GET /assets?campaign_id&type (Library search). */
   assets(campaignId: ID, type: CampaignAssetType, cursor?: string | null): Promise<Page<CampaignAsset>>;
 }

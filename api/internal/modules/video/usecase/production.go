@@ -385,14 +385,8 @@ func (s *Service) startRender(ctx context.Context, actor kernel.Actor, p *domain
 			Category: budgetuc.CategoryVideo, Override: overrideBy}); err != nil {
 			return err
 		}
-		if overrideBy != nil {
-			lim, _ := s.Budget.Limits(ctx, p.CampaignID, budgetuc.CategoryVideo, est.Total)
-			if err := s.Audit.Record(ctx, "budget.override", "ai_job", res.JobID.String(), nil, map[string]any{
-				"asset_id": p.AssetID, "job_type": jobType, "estimate": est.Total.Float64(), "per_job_limit": lim.PerJobLimit.Float64(),
-			}); err != nil {
-				return err
-			}
-		}
+		// The override itself is audited by Budget.Reserve (budget.override,
+		// only when it was actually needed), in this same transaction.
 		if mutate != nil {
 			if err := mutate(ctx); err != nil {
 				return err

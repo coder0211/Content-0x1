@@ -384,6 +384,11 @@ func (s *Service) GetCampaignForGeneration(ctx context.Context, actor kernel.Act
 	if err != nil {
 		return CampaignForGeneration{}, err
 	}
+	// SPEC-01 §2: a Creator works only in campaigns they created or are
+	// assigned to; Lead/Admin everywhere (ACS-100 IDOR).
+	if !actor.IsLeadOrAdmin() && !c.IsMember(actor.UserID) {
+		return CampaignForGeneration{}, errNotMember
+	}
 	if !c.Status.AcceptsGeneration() {
 		return CampaignForGeneration{}, kernel.InvalidTransition(string(c.Status), "generate").
 			WithMessage("Campaign đã hoàn thành hoặc lưu trữ, không thể tạo thêm nội dung")
@@ -400,6 +405,9 @@ func (s *Service) GetCampaignForGeneration(ctx context.Context, actor kernel.Act
 	}
 	return out, nil
 }
+
+// errNotMember: the actor is neither creator nor member of the campaign.
+var errNotMember = kernel.ErrForbidden.WithMessage("Bạn không thuộc campaign này nên không thể tạo nội dung trong đó")
 
 // IsMember implements API.
 func (s *Service) IsMember(ctx context.Context, id, userID kernel.ID) (bool, error) {

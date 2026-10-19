@@ -17,6 +17,9 @@ type Verified struct {
 	Width      int
 	Height     int
 	DurationMs int
+	// StorageKey is the final object key holding the verified bytes ("" =
+	// keep the upload key).
+	StorageKey string
 }
 
 // StaleFile identifies a pending upload to purge.

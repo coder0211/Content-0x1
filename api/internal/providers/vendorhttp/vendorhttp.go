@@ -45,7 +45,28 @@ type Endpoint struct {
 // NewEndpoint returns an endpoint with defaults.
 func NewEndpoint(provider, secretRef, baseURL string, timeout time.Duration) *Endpoint {
 	return &Endpoint{Provider: provider, secretRef: secretRef, baseURL: strings.TrimRight(baseURL, "/"), timeout: timeout,
-		extra: map[string]json.RawMessage{}, keyFunc: config.Secret, client: &http.Client{}}
+		extra: map[string]json.RawMessage{}, keyFunc: config.Secret, client: &http.Client{CheckRedirect: SafeRedirect}}
+}
+
+// MaxRedirects bounds redirect chains of vendor calls.
+const MaxRedirects = 3
+
+// SafeRedirect is the CheckRedirect policy of vendor clients (SSRF,
+// ACS-101): https only, at most MaxRedirects hops, and every request header
+// is dropped when the redirect leaves the original host. Go strips only
+// Authorization/Cookie on cross-host redirects, so custom key headers such
+// as x-goog-api-key or x-api-key would otherwise follow to any host.
+func SafeRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= MaxRedirects {
+		return errors.New("vendorhttp: too many redirects")
+	}
+	if req.URL.Scheme != "https" {
+		return errors.New("vendorhttp: redirect to a non-https URL refused")
+	}
+	if len(via) > 0 && !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		req.Header = http.Header{} //nolint:gosec // G119 false positive: this DROPS every header on cross-host redirects
+	}
+	return nil
 }
 
 // WithKeyFunc overrides how secret refs are resolved (tests).

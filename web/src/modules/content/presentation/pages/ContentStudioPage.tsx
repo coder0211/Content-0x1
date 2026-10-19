@@ -9,8 +9,9 @@ import { Skeleton } from "@/shared/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { toast } from "@/shared/ui/toast";
 import { contentKeys } from "../../application/keys";
-import { useCancelJob, useGenerate } from "../../application/mutations";
-import { useCampaign, useJob } from "../../application/queries";
+import { useGenerate } from "../../application/mutations";
+import { useCampaign } from "../../application/queries";
+import { useContentJob } from "../../application/useContentJob";
 import { variantLabel, type GenerateInput } from "../../domain/content";
 import { AssetWorkspace, type StartedJob } from "../components/AssetWorkspace";
 import { BriefPanel } from "../components/BriefPanel";
@@ -43,9 +44,8 @@ export default function ContentStudioPage() {
   const handled = useRef<string | null>(null);
 
   const generate = useGenerate();
-  const cancel = useCancelJob();
-  const jobQuery = useJob(job?.id ?? null);
-  const snap = jobQuery.data;
+  const jobState = useContentJob(job?.id ?? null);
+  const snap = jobState.data;
 
   const setAssets = (ids: ID[], select: ID | null) => {
     setParams(
@@ -161,8 +161,8 @@ export default function ContentStudioPage() {
               label={job.label}
               errorKind={failed ? (snap?.errorKind ?? "Transient") : null}
               errorDetail={snap?.errorMessage ?? undefined}
-              cancelling={cancel.isPending}
-              onCancel={running ? () => cancel.mutate(job.id) : undefined}
+              cancelling={jobState.isCancelling}
+              onCancel={running ? () => void jobState.cancel() : undefined}
               onRetry={
                 failed && job.kind === "generate" && lastGenerate.current
                   ? () => {

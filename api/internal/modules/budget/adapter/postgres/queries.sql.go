@@ -522,7 +522,9 @@ func (q *Queries) InsertBudget(ctx context.Context, arg InsertBudgetParams) erro
 const insertUsage = `-- name: InsertUsage :exec
 INSERT INTO ai_usage_records (id, job_id, step_id, campaign_id, user_id, provider_code, model_code, job_type,
                               usage_json, cost_amount, cost_source, currency, pricing_version, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        -- job_type is denormalised for group_by=job_type; fall back to the job's type when a caller omits it.
+        COALESCE($8::text, (SELECT j.job_type FROM ai_jobs j WHERE j.id = $2)),
         $9, $10, $11, $12, $13, $14)
 `
 

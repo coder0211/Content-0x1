@@ -1,14 +1,14 @@
-import { http as mswHttp, HttpResponse } from "msw";
 import { server } from "@/app/mocks/server";
-import { api, mockSession } from "@/shared/api/mock";
+import { http } from "@/shared/api/http";
+import { mockSession } from "@/shared/api/mock";
 import { isApiError } from "@/shared/kernel";
 import type { GenerateInput } from "../domain/content";
 import { HttpContentRepository } from "./HttpContentRepository";
-import { MOCK_BRANDS, resetContentMocks, setContentMockPolls } from "./mocks";
+import { resetContentMocks, setContentMockPolls } from "./mocks";
 
 const input: GenerateInput = {
   campaignId: null,
-  brandId: MOCK_BRANDS[0]!.id,
+  brandId: "10000000-0000-4000-8000-000000000001",
   platform: "facebook",
   contentType: "promotional_post",
   objective: "lead",
@@ -68,10 +68,11 @@ describe("HttpContentRepository", () => {
       input,
       "22222222-2222-4222-8222-222222222222",
     );
-    const job = await repo.getJob(acc.jobId);
+    // Jobs live in the shared job store (served by the job module's mocks).
+    const job = await http.get<{ status: string; result: { asset_ids: string[] } }>(`/jobs/${acc.jobId}`);
     expect(job.status).toBe("succeeded");
-    expect(job.assetIds).toHaveLength(3);
-    const asset = await repo.getAsset(job.assetIds[1]!);
+    expect(job.result.asset_ids).toHaveLength(3);
+    const asset = await repo.getAsset(job.result.asset_ids[1]!);
     expect(asset.currentVersion?.versionNo).toBe(1);
     expect(asset.currentVersion?.content?.warnings).toEqual([
       { type: "unverified_claim", text: "giảm 50%" },
@@ -94,31 +95,6 @@ describe("HttpContentRepository", () => {
         baseVersionNo: 1,
       }),
     ).rejects.toSatisfy((e) => isApiError(e) && e.code === "VERSION_CONFLICT");
-  });
-
-  it("maps job errors", async () => {
-    mockSession.signInAs("creator@acs.local");
-    server.use(
-      mswHttp.get(api("/jobs/:id"), () =>
-        HttpResponse.json({
-          data: {
-            id: "j1",
-            job_type: "content_generation",
-            status: "failed",
-            progress: 30,
-            result: null,
-            error: { kind: "ContentPolicy", message: "x" },
-          },
-          meta: { request_id: "r" },
-        }),
-      ),
-    );
-    const job = await new HttpContentRepository().getJob("j1");
-    expect(job).toMatchObject({
-      status: "failed",
-      errorKind: "ContentPolicy",
-      assetIds: [],
-    });
   });
 
   it("rejects reviewers (403)", async () => {

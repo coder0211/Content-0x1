@@ -1,5 +1,5 @@
-import type { AssetStatus, CampaignStatus, JobStatus } from "@/shared/kernel";
-import type { Campaign, CampaignAsset, CampaignAssetType, CampaignBrief, CampaignGoal, CampaignMember, ContentPlan, PlanJob } from "../domain/types";
+import type { AssetStatus, CampaignStatus } from "@/shared/kernel";
+import type { Campaign, CampaignAsset, CampaignAssetType, CampaignBrief, CampaignGoal, CampaignMember, ContentPlan } from "../domain/types";
 
 export interface CampaignBriefDto {
   product_ids: string[];
@@ -57,21 +57,14 @@ export interface CampaignDto {
   updated_at: string;
 }
 
-/** Minimal Library list row (SPEC-04 §2.8); other fields are ignored. */
+/** Minimal `AssetSummary` row of GET /assets (SPEC-04 §2.8); other fields are ignored. */
 export interface AssetRowDto {
   id: string;
-  asset_type: CampaignAssetType;
+  type: CampaignAssetType;
   title?: string | null;
   status: AssetStatus;
   created_at: string;
   updated_at?: string;
-}
-
-export interface JobDto {
-  id: string;
-  status: JobStatus;
-  progress?: number | null;
-  error?: { kind?: string; error_kind?: string; message?: string; detail?: string } | null;
 }
 
 export function toBrief(d: Partial<CampaignBriefDto> | null | undefined): CampaignBrief {
@@ -164,15 +157,6 @@ export function toCampaign(d: CampaignDto): Campaign {
 }
 
 export function toAsset(d: AssetRowDto): CampaignAsset {
-  return { id: d.id, type: d.asset_type, title: d.title ?? "", status: d.status, createdAt: d.created_at, updatedAt: d.updated_at ?? d.created_at };
+  return { id: d.id, type: d.type, title: d.title ?? "", status: d.status, createdAt: d.created_at, updatedAt: d.updated_at ?? d.created_at };
 }
 
-export function toJob(d: JobDto): PlanJob {
-  return {
-    id: d.id,
-    status: d.status,
-    progress: d.progress ?? 0,
-    errorKind: d.error?.kind ?? d.error?.error_kind ?? null,
-    errorDetail: d.error?.detail ?? d.error?.message ?? null,
-  };
-}

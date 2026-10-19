@@ -107,3 +107,31 @@ func TestUnsupported(t *testing.T) {
 		t.Fatal("empty is allowed")
 	}
 }
+
+// ACS-101: a vendor redirect never carries key headers to another host,
+// never downgrades to http and is bounded.
+func TestSafeRedirect(t *testing.T) {
+	orig, _ := http.NewRequest(http.MethodGet, "https://generativelanguage.googleapis.com/v1beta/files/x", nil)
+	mk := func(u string) *http.Request {
+		r, _ := http.NewRequest(http.MethodGet, u, nil)
+		r.Header.Set("x-goog-api-key", "secret")
+		return r
+	}
+	same := mk("https://generativelanguage.googleapis.com/download/x")
+	if err := SafeRedirect(same, []*http.Request{orig}); err != nil || same.Header.Get("x-goog-api-key") == "" {
+		t.Fatalf("same-host redirect: %v %v", err, same.Header)
+	}
+	other := mk("https://storage.example.com/x")
+	if err := SafeRedirect(other, []*http.Request{orig}); err != nil || other.Header.Get("x-goog-api-key") != "" {
+		t.Fatalf("cross-host redirect must drop key headers: %v %v", err, other.Header)
+	}
+	if err := SafeRedirect(mk("http://169.254.169.254/latest"), []*http.Request{orig}); err == nil {
+		t.Fatal("http redirect accepted")
+	}
+	if err := SafeRedirect(mk("https://x/"), []*http.Request{orig, orig, orig}); err == nil {
+		t.Fatal("unbounded redirects")
+	}
+	if NewEndpoint("p", "P_API_KEY", "https://x", time.Second).Client().CheckRedirect == nil {
+		t.Fatal("endpoint client must use SafeRedirect")
+	}
+}

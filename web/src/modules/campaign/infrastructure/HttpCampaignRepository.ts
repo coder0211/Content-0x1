@@ -1,8 +1,8 @@
 import { http } from "@/shared/api/http";
 import type { ID, Page } from "@/shared/kernel";
 import type { CampaignQuery, CampaignRepository, CreateCampaignInput, UpdateCampaignInput } from "../application/ports";
-import type { Campaign, CampaignAsset, CampaignAssetType, CampaignMember, ContentPlan, PlanJob } from "../domain/types";
-import { fromBrief, fromPlan, toAsset, toCampaign, toJob, toMember, type AssetRowDto, type CampaignDto, type CampaignMemberDto, type JobDto } from "./dto";
+import type { Campaign, CampaignAsset, CampaignAssetType, CampaignMember, ContentPlan } from "../domain/types";
+import { fromBrief, fromPlan, toAsset, toCampaign, toMember, type AssetRowDto, type CampaignDto, type CampaignMemberDto } from "./dto";
 
 export class HttpCampaignRepository implements CampaignRepository {
   async list(q: CampaignQuery): Promise<Page<Campaign>> {
@@ -57,10 +57,6 @@ export class HttpCampaignRepository implements CampaignRepository {
   async generatePlan(id: ID, idempotencyKey: string): Promise<{ jobId: ID }> {
     const r = await http.post<{ job_id: string }>(`/campaigns/${id}/plan-generations`, {}, { idempotencyKey });
     return { jobId: r.job_id };
-  }
-
-  async job(jobId: ID): Promise<PlanJob> {
-    return toJob(await http.get<JobDto>(`/jobs/${jobId}`));
   }
 
   async assets(campaignId: ID, type: CampaignAssetType, cursor?: string | null): Promise<Page<CampaignAsset>> {

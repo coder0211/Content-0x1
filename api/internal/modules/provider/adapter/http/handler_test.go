@@ -184,3 +184,37 @@ func TestModelPricingAndTemplatesFlow(t *testing.T) {
 		t.Fatal(rec.Code)
 	}
 }
+
+// FE integration: the settings UI sends a date-only effective_from; today
+// means "now", a future date is 00:00 Vietnam time, a past day is rejected.
+func TestAddPricingDateOnlyEffectiveFrom(t *testing.T) {
+	e := newEnv() // clock: 2026-10-19 09:00 UTC (16:00 in Vietnam)
+	m := e.ids["claude"].String()
+	body := func(version, from string) string {
+		return `{"pricing_version":"` + version + `","effective_from":"` + from + `","items":[{"unit":"input_token","unit_price":"0.000002"},{"unit":"output_token","unit_price":"0.00001"}]}`
+	}
+	rec := e.do(t, kernel.RoleAdmin, "POST", "/settings/models/"+m+"/pricing", body("today", "2026-10-19"))
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"effective_from":"2026-10-19T09:00:00Z"`) {
+		t.Fatalf("today: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = e.do(t, kernel.RoleAdmin, "POST", "/settings/models/"+m+"/pricing", body("future", "2026-11-01"))
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"effective_from":"2026-10-31T17:00:00Z"`) {
+		t.Fatalf("future: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(t, kernel.RoleAdmin, "POST", "/settings/models/"+m+"/pricing", body("past", "2026-10-18")); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "in_past") {
+		t.Fatalf("past: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// FE integration: GET /settings/models?provider_id= filters by provider.
+func TestListModelsByProvider(t *testing.T) {
+	e := newEnv()
+	other := e.repo.Seed("openai", []string{"image"}, domain.Model{ModelCode: "gpt-image-1", Kind: "image"})
+	rec := e.do(t, kernel.RoleAdmin, "GET", "/settings/models?provider_id="+other.ID.String(), "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "gpt-image-1") || strings.Contains(rec.Body.String(), "claude-sonnet") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(t, kernel.RoleAdmin, "GET", "/settings/models?provider_id=nope", ""); rec.Code == http.StatusOK {
+		t.Fatalf("invalid provider_id accepted: %d", rec.Code)
+	}
+}

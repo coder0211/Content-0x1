@@ -30,4 +30,16 @@ export interface StatusKinds {
 export type StatusKind = keyof StatusKinds;
 
 /** Provider error classification (SPEC-02) surfaced on failed jobs/steps. */
-export type ErrorKind = "ContentPolicy" | "RateLimited" | "Transient" | "InvalidRequest" | "Permanent";
+/** Step `error_kind` values (JobStep.error_kind in api/openapi.yaml). */
+export type ErrorKind =
+  | "ContentPolicy"
+  | "RateLimited"
+  | "Transient"
+  | "InvalidRequest"
+  | "Permanent"
+  | "Auth"
+  | "Unknown"
+  | "Timeout"
+  | "Domain"
+  | "Internal"
+  | "LeaseExpired";

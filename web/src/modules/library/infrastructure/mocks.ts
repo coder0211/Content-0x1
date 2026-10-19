@@ -1,6 +1,7 @@
 import type { HttpHandler } from "msw";
 import type { AssetStatus } from "@/shared/kernel";
 import { api, fail, MOCK_USERS, noContent, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { mockAssets, type StoredMockAsset } from "@/shared/api/mock-assets";
 import type { SessionUser } from "@/shared/lib/session";
 import type {
   AssetApprovalDto,
@@ -15,7 +16,8 @@ import type {
  * MSW handlers for the asset API (api/openapi/asset.yaml): library search, detail, versions,
  * submit-review, download — and also the review endpoints (/reviews/queue, approve,
  * request-changes), because they mutate the same in-memory asset store. The review module's
- * mocks.ts stays empty to avoid duplicate handlers.
+ * mocks.ts stays empty to avoid duplicate handlers. The store itself is shared
+ * (`@/shared/api/mock-assets`): content/image/video mocks publish the assets their jobs create.
  */
 
 const [, LEAD, CREATOR, REVIEWER] = MOCK_USERS as [SessionUser, SessionUser, SessionUser, SessionUser];
@@ -27,12 +29,7 @@ export const MOCK_CAMPAIGNS: CampaignOptionDto[] = [
 ];
 const [TET, SCHOOL] = MOCK_CAMPAIGNS as [CampaignOptionDto, CampaignOptionDto];
 
-interface StoredAsset {
-  summary: Omit<AssetSummaryDto, "current_version_no" | "thumbnail_url">;
-  versions: AssetVersionDto[];
-  approvals: AssetApprovalDto[];
-  deleted: boolean;
-}
+type StoredAsset = StoredMockAsset;
 
 let seq = 0;
 const id = (prefix: string) => `${prefix}-${String(++seq).padStart(12, "0")}`.replace(/^(.{8})-?/, "$1-0000-4000-8000-");
@@ -177,16 +174,16 @@ function seed(): StoredAsset[] {
   return assets;
 }
 
-let store: StoredAsset[] = seed();
+mockAssets.replace(seed());
 
-/** Test helper: restore the seed data. */
+/** Test helper: restore the seed data (drops assets other modules' mocks created). */
 export function resetLibraryMocks(): void {
-  store = seed();
+  mockAssets.replace(seed());
 }
 
 /** Test helper: read the in-memory store. */
 export function libraryMockAssets(): readonly StoredAsset[] {
-  return store;
+  return mockAssets.all();
 }
 
 // ---------------------------------------------------------------- helpers
@@ -194,7 +191,7 @@ export function libraryMockAssets(): readonly StoredAsset[] {
 const isLeadOrAdmin = (u: SessionUser) => u.roles.includes("admin") || u.roles.includes("marketing_lead");
 const canEdit = (u: SessionUser, a: StoredAsset) => a.summary.created_by === u.id || isLeadOrAdmin(u);
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
-const current = (a: StoredAsset) => a.versions[a.versions.length - 1]!;
+const current = (a: StoredAsset) => mockAssets.current(a);
 
 function toSummary(a: StoredAsset): AssetSummaryDto {
   const cur = current(a);
@@ -218,7 +215,7 @@ function toDetail(a: StoredAsset, u: SessionUser): AssetDetailDto {
 }
 
 function find(idParam: unknown): StoredAsset | undefined {
-  return store.find((a) => a.summary.id === idParam && !a.deleted);
+  return mockAssets.find(idParam);
 }
 
 function paginate<T>(items: T[], url: URL) {
@@ -266,7 +263,8 @@ export const handlers: HttpHandler[] = [
       const statuses = (p.get("status") ?? "").split(",").filter(Boolean);
       const from = p.get("from");
       const to = p.get("to");
-      const items = store
+      const items = mockAssets
+        .all()
         .filter((a) => !a.deleted)
         .filter((a) => !p.get("type") || a.summary.type === p.get("type"))
         .filter((a) => !statuses.length || statuses.includes(a.summary.status))
@@ -330,6 +328,31 @@ export const handlers: HttpHandler[] = [
       const a = find(params.id);
       if (!a) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
       return page([...a.versions].reverse(), null);
+    }),
+  ),
+
+  rest.post(
+    api("/assets/:id/versions"),
+    withAuth(null, async ({ params, request, user }) => {
+      const a = find(params.id);
+      if (!a || !user.permissions.includes("brand.view")) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
+      if (!canEdit(user, a)) return fail(403, "FORBIDDEN", "Thiếu quyền");
+      if (a.summary.status === "archived") return fail(409, "INVALID_STATE_TRANSITION", "Không thể chuyển sang trạng thái này");
+      const body = await jsonBody(request);
+      if (typeof body.content_json !== "object" || body.content_json === null || typeof body.base_version_no !== "number") {
+        return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [{ field: "content_json", issue: "required" }]);
+      }
+      if (body.base_version_no !== current(a).version_no) {
+        return fail(409, "VERSION_CONFLICT", "Dữ liệu đã được người khác cập nhật, vui lòng tải lại");
+      }
+      const v = mockAssets.addVersion(a, {
+        content: body.content_json as Record<string, unknown>,
+        files: current(a).files,
+        changeNote: typeof body.change_note === "string" && body.change_note.trim() ? body.change_note.trim() : null,
+        createdBy: user.id,
+      });
+      a.summary.status = "draft";
+      return ok(v, { status: 201 });
     }),
   ),
 
@@ -416,7 +439,8 @@ export const handlers: HttpHandler[] = [
       const url = new URL(request.url);
       const type = url.searchParams.get("type");
       const campaign = url.searchParams.get("campaign_id");
-      const items = store
+      const items = mockAssets
+        .all()
         .filter((a) => !a.deleted && a.summary.status === "pending_review")
         .filter((a) => !type || a.summary.type === type)
         .filter((a) => !campaign || a.summary.campaign_id === campaign)
@@ -437,15 +461,14 @@ export const handlers: HttpHandler[] = [
       const body = await jsonBody(request);
       const files = isLeadOrAdmin(user) ? a.versions.flatMap((v) => v.files) : current(a).files;
       const file = body.file_id ? files.find((f) => f.file_id === body.file_id) : (current(a).files.find((f) => f.role === "primary") ?? current(a).files[0]);
+      if (!file && !body.file_id && a.summary.type === "content") {
+        // Like the backend: text content has no stored file, so the current version is exported as .txt.
+        const exportId = id("40000000");
+        return ok<AssetDownloadUrlDto>({ url: `/mock-storage/exports/${a.summary.id}-v${current(a).version_no}.txt`, expires_at: new Date(Date.now() + 15 * 60_000).toISOString(), file_id: exportId });
+      }
       if (!file) return fail(404, "NOT_FOUND", "Asset không có tệp để tải");
       return ok<AssetDownloadUrlDto>({ url: file.url ?? "", expires_at: new Date(Date.now() + 15 * 60_000).toISOString(), file_id: file.file_id });
     }),
   ),
 
-  // Fallback for the library campaign filter. The campaign module's own handler (registered
-  // earlier in app/mocks/handlers.ts) takes precedence once it exists.
-  rest.get(
-    api("/campaigns"),
-    withAuth("brand.view", () => page(MOCK_CAMPAIGNS.map((c) => ({ ...c })), null)),
-  ),
 ];

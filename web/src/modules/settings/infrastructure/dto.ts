@@ -72,23 +72,18 @@ export function toAuditEntry(d: AuditLogDto): AuditEntry {
   };
 }
 
-/*
- * Provider admin DTOs (SPEC-04 §2.9, columns from SPEC-03 ai_providers / ai_models / model_pricing).
- * The provider API is built in parallel (Agent 4); these shapes are an assumption recorded in
- * docs/DECISIONS.md. The API never returns secret values: only `secret_ref` (a name) and,
- * optionally, `secret_configured` (whether that secret resolves on the server).
- */
+/** `AIProvider` in api/openapi/provider.yaml. The API never returns secret values, only `secret_ref`. */
 export interface ProviderDto {
   id: string;
   code: string;
   name: string;
-  kind: ModelKind[];
+  kinds: ModelKind[];
   status: ActiveStatus;
   secret_ref: string;
-  secret_configured?: boolean | null;
+  secret_configured: boolean;
+  adapter_available: boolean;
   config_json: Record<string, unknown> | null;
-  created_at?: string;
-  updated_at?: string | null;
+  updated_at: string;
 }
 
 export interface UpdateProviderDto {
@@ -102,7 +97,7 @@ export function toProvider(d: ProviderDto): Provider {
     id: d.id,
     code: d.code,
     name: d.name,
-    kinds: d.kind ?? [],
+    kinds: d.kinds ?? [],
     status: d.status,
     secretRef: d.secret_ref,
     secretConfigured: d.secret_configured ?? null,
@@ -111,16 +106,20 @@ export function toProvider(d: ProviderDto): Provider {
   };
 }
 
+/** `AIModel` in api/openapi/provider.yaml. */
 export interface ModelDto {
   id: string;
   provider_id: string;
-  provider_code?: string | null;
+  provider_code: string;
+  provider_status: ActiveStatus;
   model_code: string;
   kind: ModelKind;
   capabilities: Record<string, unknown> | null;
   concurrency_limit: number;
   is_default: boolean;
   status: ActiveStatus;
+  adapter_available: boolean;
+  usable: boolean;
 }
 
 export interface CreateModelDto {
@@ -153,35 +152,41 @@ export function toModel(d: ModelDto): AiModel {
   };
 }
 
-/** NUMERIC(14,8) may arrive as a JSON number or a decimal string. */
-export interface PricingDto {
-  id: string;
-  model_id: string;
-  pricing_version: string;
+/** `AIPriceItem`: unit_price is a decimal string (shopspring/decimal). */
+export interface PriceItemDto {
   unit: string;
-  unit_price: number | string;
+  unit_price: string;
+}
+
+/** `AIPricingVersion` in api/openapi/provider.yaml — one version with all its unit prices. */
+export interface PricingVersionDto {
+  pricing_version: string;
   currency: string;
   effective_from: string;
   effective_to: string | null;
+  is_current: boolean;
+  items: PriceItemDto[];
 }
 
-/** POST /settings/models/{id}/pricing — appends a whole version (one row per unit). */
+/** POST /settings/models/{id}/pricing — appends a whole version. `effective_from` omitted = now. */
 export interface CreatePricingDto {
   pricing_version: string;
-  effective_from: string;
+  effective_from?: string;
   currency: string;
-  prices: { unit: string; unit_price: number }[];
+  items: PriceItemDto[];
 }
 
-export function toPricing(d: PricingDto): PricingRow {
-  return {
-    id: d.id,
-    modelId: d.model_id,
+/** Flattens a pricing version into one domain row per unit. */
+export function toPricingRows(modelId: string, d: PricingVersionDto): PricingRow[] {
+  return (d.items ?? []).map((it) => ({
+    id: `${d.pricing_version}:${it.unit}`,
+    modelId,
     pricingVersion: d.pricing_version,
-    unit: d.unit,
-    unitPrice: typeof d.unit_price === "string" ? Number(d.unit_price) : d.unit_price,
+    unit: it.unit,
+    unitPrice: Number(it.unit_price),
     currency: d.currency,
     effectiveFrom: d.effective_from,
     effectiveTo: d.effective_to ?? null,
-  };
+    isCurrent: d.is_current,
+  }));
 }

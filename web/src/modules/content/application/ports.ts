@@ -7,7 +7,6 @@ import type {
   ContentVersion,
   GenerateInput,
   JobAccepted,
-  JobSnapshot,
   ProductOption,
   RewriteInput,
   SaveVersionInput,
@@ -25,13 +24,12 @@ export interface ContentRepository {
     target: ContentFormat,
     idempotencyKey: string,
   ): Promise<JobAccepted>;
-  /** GET /jobs/{id} (polled until terminal). */
-  getJob(jobId: ID): Promise<JobSnapshot>;
-  cancelJob(jobId: ID): Promise<void>;
   getAsset(assetId: ID): Promise<ContentAsset>;
   listVersions(assetId: ID): Promise<ContentVersion[]>;
   saveVersion(assetId: ID, input: SaveVersionInput): Promise<ContentVersion>;
   restoreVersion(assetId: ID, versionNo: number): Promise<ContentVersion>;
+  /** POST /assets/{id}/submit-review (asset module, ACS-080). */
+  submitReview(assetId: ID): Promise<void>;
   listBrands(): Promise<BrandOption[]>;
   listProducts(brandId: ID): Promise<ProductOption[]>;
   getCampaign(campaignId: ID): Promise<CampaignSummary>;

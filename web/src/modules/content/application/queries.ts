@@ -1,22 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ID } from "@/shared/kernel";
 import { useRepository } from "@/shared/lib/di";
-import { isTerminal } from "../domain/content";
 import { contentKeys } from "./keys";
-
-/** Poll interval for GET /jobs/{id} while a job runs (job module exposes no shared hook yet). */
-export const JOB_POLL_MS = 1500;
-
-export function useJob(jobId: ID | null) {
-  const repo = useRepository("content");
-  return useQuery({
-    queryKey: contentKeys.job(jobId ?? "none"),
-    queryFn: () => repo.getJob(jobId!),
-    enabled: !!jobId,
-    refetchInterval: (q) =>
-      q.state.data && isTerminal(q.state.data.status) ? false : JOB_POLL_MS,
-  });
-}
 
 export function useContentAsset(assetId: ID | null) {
   const repo = useRepository("content");

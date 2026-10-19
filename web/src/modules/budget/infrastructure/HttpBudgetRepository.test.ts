@@ -38,5 +38,11 @@ describe("HttpBudgetRepository ↔ mocks contract", () => {
     const b = await repo.putCampaignBudget("c0000000-0000-4000-8000-000000000002", { limitAmount: 75, alertThresholds: [50, 100] });
     expect(b.limitAmount).toBe(75);
     expect((await repo.getSettings()).campaigns).toHaveLength(2);
+    expect((await repo.getCampaignBudget("c0000000-0000-4000-8000-000000000002"))?.limitAmount).toBe(75);
+  });
+
+  it("returns null for a campaign without a budget", async () => {
+    mockSession.signInAs("lead@acs.local");
+    expect(await repo.getCampaignBudget("c0000000-0000-4000-8000-0000000000ff")).toBeNull();
   });
 });

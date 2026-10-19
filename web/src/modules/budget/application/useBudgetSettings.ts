@@ -8,6 +8,16 @@ export function useBudgetSettings() {
   return useQuery({ queryKey: budgetKeys.settings(), queryFn: () => repo.getSettings() });
 }
 
+/** The campaign's own budget, or `null` when none is set. */
+export function useCampaignBudget(campaignId: string | undefined) {
+  const repo = useRepository("budget");
+  return useQuery({
+    queryKey: budgetKeys.campaign(campaignId ?? ""),
+    queryFn: () => repo.getCampaignBudget(campaignId!),
+    enabled: Boolean(campaignId),
+  });
+}
+
 export function useUpdateBudgetSettings() {
   const repo = useRepository("budget");
   const qc = useQueryClient();

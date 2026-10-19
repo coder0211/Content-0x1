@@ -2,7 +2,6 @@ import type { ID } from "@/shared/kernel";
 
 export const contentKeys = {
   all: ["content"] as const,
-  job: (id: ID) => ["content", "job", id] as const,
   asset: (id: ID) => ["content", "asset", id] as const,
   versions: (id: ID) => ["content", "asset", id, "versions"] as const,
   brands: () => ["content", "brands"] as const,

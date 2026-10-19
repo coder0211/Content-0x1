@@ -46,9 +46,29 @@ func NewProber(bin string) *Prober { return &Prober{Bin: bin, Run: ExecRunner} }
 
 var _ ports.MediaProber = (*Prober)(nil)
 
-// ProbeArgs builds the ffprobe argument vector for src.
+// ProbeArgs builds the ffprobe argument vector for src. Only the local file
+// protocol is allowed, so a crafted playlist (HLS/concat) cannot make
+// ffprobe open network URLs or other protocols (ACS-101).
 func ProbeArgs(src string) []string {
-	return []string{"-v", "error", "-print_format", "json", "-show_format", "-show_streams", "--", src}
+	return []string{"-v", "error", "-protocol_whitelist", "file", "-print_format", "json", "-show_format", "-show_streams", "--", src}
+}
+
+// Harden makes an ffmpeg argument vector safe to run on untrusted media
+// (ACS-101): -nostdin, and -protocol_whitelist file before every input
+// except lavfi sources (which open no protocol). Nested resources opened
+// by a demuxer (HLS/concat playlists) inherit the whitelist, so a crafted
+// "image" cannot make ffmpeg fetch URLs or read through other protocols.
+func Harden(args []string) []string {
+	out := make([]string, 0, len(args)+8)
+	out = append(out, "-nostdin")
+	for i, a := range args {
+		lavfi := i >= 2 && args[i-2] == "-f" && args[i-1] == "lavfi"
+		if a == "-i" && !lavfi {
+			out = append(out, "-protocol_whitelist", "file")
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // Probe runs ffprobe on src (local path or internal signed URL).
@@ -171,7 +191,7 @@ func NormalizeArgs(s ports.NormalizeSpec) []string {
 
 // Normalize converts a clip to the canonical format.
 func (r *Renderer) Normalize(ctx context.Context, s ports.NormalizeSpec) error {
-	_, err := r.Run(ctx, r.Bin, NormalizeArgs(s)...)
+	_, err := r.Run(ctx, r.Bin, Harden(NormalizeArgs(s))...)
 	return err
 }
 
@@ -193,7 +213,7 @@ func StillToClipArgs(s ports.StillClipSpec) []string {
 
 // StillToClip renders a Ken Burns clip from an image.
 func (r *Renderer) StillToClip(ctx context.Context, s ports.StillClipSpec) error {
-	_, err := r.Run(ctx, r.Bin, StillToClipArgs(s)...)
+	_, err := r.Run(ctx, r.Bin, Harden(StillToClipArgs(s))...)
 	return err
 }
 
@@ -343,7 +363,7 @@ func (r *Renderer) Render(ctx context.Context, s ports.RenderSpec) (ports.Render
 	if err != nil {
 		return ports.RenderResult{}, err
 	}
-	if _, err := r.Run(ctx, r.Bin, args...); err != nil {
+	if _, err := r.Run(ctx, r.Bin, Harden(args)...); err != nil {
 		return ports.RenderResult{}, err
 	}
 	return ports.RenderResult{Output: s.Output}, nil
@@ -357,6 +377,6 @@ func ThumbnailArgs(input, output string, at time.Duration) []string {
 
 // Thumbnail writes a JPEG frame of input at `at`.
 func (r *Renderer) Thumbnail(ctx context.Context, input, output string, at time.Duration) error {
-	_, err := r.Run(ctx, r.Bin, ThumbnailArgs(input, output, at)...)
+	_, err := r.Run(ctx, r.Bin, Harden(ThumbnailArgs(input, output, at))...)
 	return err
 }

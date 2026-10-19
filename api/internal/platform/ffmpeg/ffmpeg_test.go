@@ -75,3 +75,27 @@ func TestRenderArgsRejectsFilterInjection(t *testing.T) {
 		t.Fatal("missing filter_complex")
 	}
 }
+
+// ACS-101: every file input is restricted to the file protocol; lavfi
+// sources are left alone; stdin is never read.
+func TestHardenRestrictsInputProtocols(t *testing.T) {
+	got := Harden(StillToClipArgs(ports.StillClipSpec{Image: "/tmp/in.png", Output: "/tmp/out.mp4", DurationMs: 2000,
+		Format: ports.OutputFormat{Width: 1080, Height: 1920, FPS: 30}}))
+	if got[0] != "-nostdin" {
+		t.Fatalf("missing -nostdin: %v", got)
+	}
+	i := slices.Index(got, "/tmp/in.png")
+	if i < 4 || got[i-1] != "-i" || got[i-3] != "-protocol_whitelist" || got[i-2] != "file" {
+		t.Fatalf("file input not whitelisted: %v", got)
+	}
+	j := slices.Index(got, "anullsrc=channel_layout=stereo:sample_rate=48000")
+	if j < 0 || got[j-2] == "file" {
+		t.Fatalf("lavfi input must not get a protocol whitelist: %v", got)
+	}
+	if n := strings.Count(strings.Join(got, " "), "-protocol_whitelist"); n != 1 {
+		t.Fatalf("whitelists: %d in %v", n, got)
+	}
+	if !slices.Contains(ProbeArgs("/tmp/x.mp4"), "-protocol_whitelist") {
+		t.Fatal("ffprobe must whitelist protocols")
+	}
+}

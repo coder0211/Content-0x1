@@ -198,6 +198,11 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, kernel.Validation(kernel.Detail{"field": "kind", "issue": "invalid", "supported": domain.Kinds}))
 		return
 	}
+	providerID, err := httpx.QueryID(r, "provider_id")
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
 	ms, err := h.Svc.AdminListModels(r.Context(), httpx.ActorFrom(r), kind)
 	if err != nil {
 		httpx.Error(w, r, err)
@@ -205,6 +210,9 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]modelDTO, 0, len(ms))
 	for _, m := range ms {
+		if providerID != nil && m.ProviderID != *providerID {
+			continue
+		}
 		out = append(out, presentModel(m))
 	}
 	httpx.List(w, r, out, nil)
@@ -294,8 +302,32 @@ func (h *Handler) listPricing(w http.ResponseWriter, r *http.Request) {
 type addPricingRequest struct {
 	PricingVersion string         `json:"pricing_version"`
 	Currency       string         `json:"currency"`
-	EffectiveFrom  *time.Time     `json:"effective_from"`
+	EffectiveFrom  *flexTime      `json:"effective_from"`
 	Items          []priceItemDTO `json:"items"`
+}
+
+// businessZone is the Vietnam business day (UTC+7) used for date-only input.
+var businessZone = time.FixedZone("ICT", 7*3600)
+
+// flexTime accepts RFC3339 or a date-only "YYYY-MM-DD" (the settings UI
+// sends dates); a date means 00:00 of that day in Vietnam time (UTC+7).
+type flexTime struct{ time.Time }
+
+func (f *flexTime) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	if t, err := time.ParseInLocation(time.DateOnly, s, businessZone); err == nil {
+		f.Time = t
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return err
+	}
+	f.Time = t
+	return nil
 }
 
 func (h *Handler) addPricing(w http.ResponseWriter, r *http.Request) {
@@ -312,8 +344,12 @@ func (h *Handler) addPricing(w http.ResponseWriter, r *http.Request) {
 	for _, it := range req.Items {
 		items = append(items, domain.PriceItem{Unit: it.Unit, UnitPrice: it.UnitPrice})
 	}
+	var from *time.Time
+	if req.EffectiveFrom != nil {
+		from = &req.EffectiveFrom.Time
+	}
 	p, err := h.Svc.AddPricingVersion(r.Context(), httpx.ActorFrom(r), id, usecase.AddPricingInput{Version: req.PricingVersion,
-		Currency: req.Currency, EffectiveFrom: req.EffectiveFrom, Items: items})
+		Currency: req.Currency, EffectiveFrom: from, Items: items})
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

@@ -1,8 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useJob } from "@/modules/job";
 import type { ID } from "@/shared/kernel";
 import { useRepository } from "@/shared/lib/di";
 import { newIdempotencyKey } from "@/shared/lib/id";
-import type { Campaign, CampaignAssetType, ContentPlan } from "../domain/types";
+import type { Campaign, CampaignAssetType, ContentPlan, PlanJob } from "../domain/types";
 import { campaignKeys } from "./keys";
 import type { CampaignQuery, CreateCampaignInput, UpdateCampaignInput } from "./ports";
 
@@ -62,23 +64,28 @@ export function useGeneratePlan(id: ID) {
   return useMutation({ mutationFn: (key: string = newIdempotencyKey()) => repo.generatePlan(id, key) });
 }
 
-const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
-
-/** Polls the content_plan job every 3 s until it ends (SSE fallback cadence). */
-export function usePlanJob(campaignId: ID, jobId: ID | null) {
-  const repo = useRepository("campaign");
+/**
+ * Live content_plan job through the job module (`useJob`: SSE, 3 s polling fallback). The job writes
+ * campaigns.content_plan_proposal, so the campaign is reloaded when it succeeds.
+ */
+export function usePlanJob(campaignId: ID, jobId: ID | null): { data: PlanJob | undefined } {
   const qc = useQueryClient();
-  return useQuery({
-    queryKey: campaignKeys.job(jobId ?? ""),
-    queryFn: async () => {
-      const j = await repo.job(jobId!);
-      // The job writes campaigns.content_plan_proposal; reload the campaign to show it.
-      if (j.status === "succeeded") await qc.invalidateQueries({ queryKey: campaignKeys.detail(campaignId) });
-      return j;
+  const { job } = useJob(jobId);
+  const succeeded = job?.status === "succeeded";
+  useEffect(() => {
+    if (succeeded) void qc.invalidateQueries({ queryKey: campaignKeys.detail(campaignId) });
+  }, [succeeded, campaignId, qc]);
+  if (!job) return { data: undefined };
+  const failed = job.steps.find((s) => s.status === "failed");
+  return {
+    data: {
+      id: job.id,
+      status: job.status,
+      progress: job.progress,
+      errorKind: failed?.errorKind ?? job.error?.code ?? null,
+      errorDetail: job.error?.message ?? null,
     },
-    enabled: !!jobId,
-    refetchInterval: (q) => (q.state.data && TERMINAL.has(q.state.data.status) ? false : 3000),
-  });
+  };
 }
 
 export function useCampaignAssets(campaignId: ID, type: CampaignAssetType) {

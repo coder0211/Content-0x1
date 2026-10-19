@@ -99,7 +99,7 @@ func (r *Repository) GetMany(ctx context.Context, ids []kernel.ID) ([]domain.Fil
 func (r *Repository) MarkReady(ctx context.Context, id kernel.ID, v usecase.Verified) error {
 	return r.q(ctx).MarkFileReady(ctx, MarkFileReadyParams{
 		ID: id, MimeType: v.MimeType, Kind: string(v.Kind), SizeBytes: v.SizeBytes, ChecksumSha256: str(v.Checksum),
-		Width: i32(v.Width), Height: i32(v.Height), DurationMs: i32(v.DurationMs),
+		Width: i32(v.Width), Height: i32(v.Height), DurationMs: i32(v.DurationMs), StorageKey: str(v.StorageKey),
 	})
 }
 

@@ -16,6 +16,8 @@ type Storage struct {
 	Objects map[string][]byte
 	Types   map[string]string
 	Deleted []string
+	// LastGet is the options of the last PresignGet call.
+	LastGet ports.PresignGetOptions
 }
 
 // NewStorage returns an empty store.
@@ -30,7 +32,10 @@ func (s *Storage) PresignPut(_ context.Context, key string, o ports.PresignPutOp
 		Headers: map[string]string{"Content-Type": o.ContentType}, ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
 }
 
-func (s *Storage) PresignGet(_ context.Context, key string, _ ports.PresignGetOptions) (ports.PresignedRequest, error) {
+func (s *Storage) PresignGet(_ context.Context, key string, o ports.PresignGetOptions) (ports.PresignedRequest, error) {
+	s.mu.Lock()
+	s.LastGet = o
+	s.mu.Unlock()
 	return ports.PresignedRequest{URL: "https://s3.test/" + key + "?X-Amz-Signature=x", Method: "GET", ExpiresAt: time.Now().Add(15 * time.Minute)}, nil
 }
 

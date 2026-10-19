@@ -89,8 +89,20 @@ func ValidateSecretRef(v *kernel.ValidationErrors, ref string) {
 	if !secretRefRe.MatchString(ref) {
 		v.AddDetail(kernel.Detail{"field": "secret_ref", "issue": "invalid_format",
 			"hint": "Tên biến môi trường, ví dụ OPENAI_API_KEY (không nhập giá trị key)"})
+		return
+	}
+	// Only provider credentials (…_API_KEY, …_CREDENTIALS, …_TOKEN), never
+	// platform configuration (mirrors config.IsProviderSecretRef, ACS-101).
+	if !providerSecretRe.MatchString(ref) || platformSecretRe.MatchString(ref) {
+		v.AddDetail(kernel.Detail{"field": "secret_ref", "issue": "not_a_provider_secret",
+			"hint": "Chỉ dùng biến có hậu tố _API_KEY, _CREDENTIALS hoặc _TOKEN (không dùng cấu hình hệ thống)"})
 	}
 }
+
+var (
+	providerSecretRe = regexp.MustCompile(`^[A-Z0-9_]+(_API_KEY|_CREDENTIALS|_TOKEN)$`)
+	platformSecretRe = regexp.MustCompile(`^(DATABASE|REDIS|S3|SMTP|SESSION|COOKIE|CSRF|APP|ACS)_`)
+)
 
 // secretish lists config_json key fragments that would indicate a secret.
 var secretish = []string{"key", "secret", "token", "password", "credential", "auth"}

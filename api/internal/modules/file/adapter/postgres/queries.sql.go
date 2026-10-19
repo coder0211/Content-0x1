@@ -185,8 +185,10 @@ func (q *Queries) ListStalePendingFiles(ctx context.Context, arg ListStalePendin
 const markFileReady = `-- name: MarkFileReady :exec
 UPDATE asset_files
 SET upload_status = 'ready', mime_type = $1, kind = $2, size_bytes = $3,
-    checksum_sha256 = $4, width = $5, height = $6, duration_ms = $7
-WHERE id = $8 AND upload_status = 'pending'
+    checksum_sha256 = $4, width = $5, height = $6, duration_ms = $7,
+    -- verified bytes live under a key the browser never had a PUT URL for (ACS-101)
+    storage_key = COALESCE($8::text, storage_key)
+WHERE id = $9 AND upload_status = 'pending'
 `
 
 type MarkFileReadyParams struct {
@@ -197,6 +199,7 @@ type MarkFileReadyParams struct {
 	Width          *int32
 	Height         *int32
 	DurationMs     *int32
+	StorageKey     *string
 	ID             uuid.UUID
 }
 
@@ -209,6 +212,7 @@ func (q *Queries) MarkFileReady(ctx context.Context, arg MarkFileReadyParams) er
 		arg.Width,
 		arg.Height,
 		arg.DurationMs,
+		arg.StorageKey,
 		arg.ID,
 	)
 	return err

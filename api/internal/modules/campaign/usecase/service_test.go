@@ -177,6 +177,13 @@ func TestContentPlanFlow(t *testing.T) {
 	if _, err := e.svc.GetCampaignForGeneration(ctx, testutil.Actor(kernel.RoleReviewer), c.ID); !errors.Is(err, kernel.ErrForbidden) {
 		t.Fatal(err)
 	}
+	// ACS-100: another creator (not a member) may not generate in it; Lead may.
+	if _, err := e.svc.GetCampaignForGeneration(ctx, testutil.Actor(kernel.RoleContentCreator), c.ID); !errors.Is(err, kernel.ErrForbidden) {
+		t.Fatalf("non-member creator: %v", err)
+	}
+	if _, err := e.svc.GetCampaignForGeneration(ctx, testutil.Actor(kernel.RoleMarketingLead), c.ID); err != nil {
+		t.Fatalf("lead: %v", err)
+	}
 	ok, _ := e.svc.IsMember(ctx, c.ID, e.creator.UserID)
 	if !ok {
 		t.Fatal("creator is member")

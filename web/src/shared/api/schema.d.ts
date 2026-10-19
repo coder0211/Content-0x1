@@ -1149,7 +1149,7 @@ export interface paths {
         /** List prompt template versions, optionally of one code */
         get: operations["listPromptTemplates"];
         put?: never;
-        /** Create the next version of a template code (Lead/Admin; audited); optionally activate it */
+        /** Create the next version of a template code (Admin or Marketing Lead per SPEC-01 FR-CNT-08; audited); optionally activate it */
         post: operations["createPromptTemplateVersion"];
         delete?: never;
         options?: never;
@@ -1187,7 +1187,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Make this version the active one of its code (previous active → retired; Lead/Admin; audited) */
+        /** Make this version the active one of its code (previous active → retired; Admin or Marketing Lead per FR-CNT-08; audited) */
         post: operations["activatePromptTemplate"];
         delete?: never;
         options?: never;
@@ -1206,7 +1206,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retire a version (Lead/Admin; audited) */
+        /** Retire a version (Admin or Marketing Lead per FR-CNT-08; audited) */
         post: operations["retirePromptTemplate"];
         delete?: never;
         options?: never;
@@ -5106,6 +5106,8 @@ export interface operations {
         parameters: {
             query?: {
                 kind?: components["schemas"]["AIKind"];
+                /** @description Only models of this provider */
+                provider_id?: components["schemas"]["UUID"];
             };
             header?: never;
             path?: never;
@@ -5285,8 +5287,8 @@ export interface operations {
                     /** @example USD */
                     currency: string;
                     /**
-                     * Format: date-time
-                     * @description Defaults to now; must not be in the past
+                     * @description RFC3339 date-time or date-only YYYY-MM-DD (00:00 Vietnam time, UTC+7). Defaults to now. A start earlier today (e.g. today's date) means now; earlier days are rejected (in_past).
+                     * @example 2026-11-01
                      */
                     effective_from?: string;
                     items: components["schemas"]["AIPriceItem"][];

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { newIdempotencyKey } from "@/shared/lib/id";
+import { useJob } from "@/modules/job";
 import { useRepository } from "@/shared/lib/di";
 import type { ID } from "@/shared/kernel";
 import { isBatchActive, type GenerationOptions, type ImageBatch, type Preset, type StudioTarget } from "../domain/image";
@@ -116,33 +117,27 @@ export function useUploadReference() {
   return useMutation({ mutationFn: (file: File) => repo.uploadReference(file) });
 }
 
-/** "AI đề xuất prompt" (FR-IMG-03): starts the suggestion job, then polls it until it has prompts. */
+/** "AI đề xuất prompt" (FR-IMG-03): starts the suggestion job, then follows it until it has prompts. */
 export function usePromptSuggestions() {
   const repo = useRepository("image");
   const intent = useIntentKey();
   const [jobId, setJobId] = useState<ID | null>(null);
   const start = useMutation({
-    mutationFn: (input: { campaignId?: ID; preset: Preset }) => repo.requestPromptSuggestions(input, intent.get()),
+    mutationFn: (input: { campaignId?: ID; brandId?: ID; preset: Preset }) => repo.requestPromptSuggestions(input, intent.get()),
     onSuccess: (id) => {
       intent.reset();
       setJobId(id);
     },
   });
-  const job = useQuery({
-    queryKey: imageKeys.suggestions(jobId),
-    queryFn: () => repo.getPromptSuggestions(jobId!),
-    enabled: jobId != null,
-    refetchInterval: (query) => {
-      const s = query.state.data?.status;
-      return s === "succeeded" || s === "failed" || s === "cancelled" ? false : 1000;
-    },
-  });
+  // Job state through the job module (SSE with 3s polling fallback); prompts are in `result.prompts`.
+  const { job } = useJob(jobId);
+  const prompts = job?.status === "succeeded" && Array.isArray(job.result?.prompts) ? (job.result.prompts as unknown[]).filter((p): p is string => typeof p === "string") : [];
   return {
     start: start.mutate,
     starting: start.isPending,
-    status: jobId == null ? null : (job.data?.status ?? "queued"),
-    prompts: job.data?.prompts ?? [],
-    errorKind: job.data?.errorKind ?? null,
+    status: jobId == null ? null : (job?.status ?? "queued"),
+    prompts,
+    errorKind: job?.status === "failed" ? (job.steps.find((s) => s.status === "failed")?.errorKind ?? job.error?.code ?? null) : null,
     dismiss: () => setJobId(null),
   };
 }

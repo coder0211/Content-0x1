@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import {
   AlertTriangle,
   ArrowRightLeft,
   Clapperboard,
   History,
+  Library,
   RotateCcw,
+  Send,
 } from "lucide-react";
 import type { ID } from "@/shared/kernel";
 import { formatRelative } from "@/shared/lib/format";
@@ -31,6 +33,7 @@ import {
   useRestoreVersion,
   useRewrite,
   useSaveVersion,
+  useSubmitReview,
   useTransform,
 } from "../../application/mutations";
 import { useAssetVersions, useContentAsset } from "../../application/queries";
@@ -165,6 +168,7 @@ function Workspace({
   const save = useSaveVersion(asset.id);
   const rewrite = useRewrite(asset.id);
   const transform = useTransform(asset.id);
+  const submit = useSubmitReview(asset.id);
 
   const next = useMemo(
     () =>
@@ -452,6 +456,29 @@ function Workspace({
               <Clapperboard aria-hidden />
               Gửi sang Video Studio
             </Button>
+            <Button asChild variant="ghost">
+              <Link to={`/library/${asset.id}`}>
+                <Library aria-hidden />
+                Mở trong thư viện
+              </Link>
+            </Button>
+            {asset.status === "draft" ? (
+              <Button
+                variant="secondary"
+                className="ml-auto"
+                disabled={dirty || actionsDisabled}
+                title={dirty ? "Lưu phiên bản trước khi gửi duyệt" : undefined}
+                loading={submit.isPending}
+                onClick={() =>
+                  submit.mutate(undefined, {
+                    onSuccess: () => toast.success("Đã gửi duyệt"),
+                  })
+                }
+              >
+                <Send aria-hidden />
+                Gửi duyệt
+              </Button>
+            ) : null}
           </div>
         </div>
       </section>

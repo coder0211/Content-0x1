@@ -296,6 +296,13 @@ export const handlers: HttpHandler[] = [
       return ok(settingsDto());
     }),
   ),
+  rest.get(
+    api("/campaigns/:id/budget"),
+    withAuth<{ id: string }>("usage.view", ({ params }) => {
+      const b = state.campaigns.find((c) => c.campaign_id === params.id);
+      return ok(b ? budgetDto(b) : null);
+    }),
+  ),
   rest.put(
     api("/campaigns/:id/budget"),
     withAuth<{ id: string }>("budget.manage", async ({ request, params }) => {

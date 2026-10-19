@@ -88,6 +88,10 @@ type FFmpegConfig struct {
 	FFmpegPath  string
 	FFprobePath string
 	TempDir     string
+	// FontsDir is passed to libass for subtitle burn-in (fonts with
+	// Vietnamese glyphs, e.g. /usr/share/fonts/noto in the render image).
+	// Empty = libass/fontconfig system defaults.
+	FontsDir string
 }
 
 // IsProduction reports whether Env is production.
@@ -148,6 +152,7 @@ func load(getenv func(string) string) (Config, error) {
 			FFmpegPath:  e.str("FFMPEG_PATH", "ffmpeg"),
 			FFprobePath: e.str("FFPROBE_PATH", "ffprobe"),
 			TempDir:     e.str("MEDIA_TEMP_DIR", os.TempDir()),
+			FontsDir:    e.str("VIDEO_FONTS_DIR", ""),
 		},
 		CORSOrigins:  e.list("CORS_ORIGINS", []string{"http://localhost:5173"}),
 		SignedURLTTL: e.duration("SIGNED_URL_TTL", 15*time.Minute),
@@ -254,9 +259,46 @@ func (e *env) list(key string, def []string) []string {
 
 // Secret returns the value of the environment variable named by ref
 // (ai_providers.secret_ref). It never logs or caches the value.
+//
+// Only provider-credential names resolve (IsProviderSecretRef): an Admin
+// editing ai_providers.secret_ref must not be able to point a vendor
+// adapter at a platform secret such as DATABASE_URL or S3_SECRET_KEY and
+// send it to the vendor base_url (ACS-101).
 func Secret(ref string) string {
-	if ref == "" || ref == "none" {
+	if !IsProviderSecretRef(ref) {
 		return ""
 	}
 	return os.Getenv(ref)
+}
+
+// providerSecretSuffixes are the accepted endings of a provider secret name.
+var providerSecretSuffixes = []string{"_API_KEY", "_CREDENTIALS", "_TOKEN"}
+
+// platformSecretPrefixes name platform configuration that must never be
+// handed to a vendor adapter.
+var platformSecretPrefixes = []string{"DATABASE_", "REDIS_", "S3_", "SMTP_", "SESSION_", "COOKIE_", "CSRF_", "APP_", "ACS_"}
+
+// IsProviderSecretRef reports whether ref may name a provider credential:
+// an upper-case env var name ending in _API_KEY, _CREDENTIALS or _TOKEN
+// that is not platform configuration. "none" and "" are not references.
+func IsProviderSecretRef(ref string) bool {
+	if ref == "" || ref == "none" || len(ref) > 64 {
+		return false
+	}
+	for _, r := range ref {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	for _, p := range platformSecretPrefixes {
+		if strings.HasPrefix(ref, p) {
+			return false
+		}
+	}
+	for _, s := range providerSecretSuffixes {
+		if strings.HasSuffix(ref, s) && len(ref) > len(s) {
+			return true
+		}
+	}
+	return false
 }

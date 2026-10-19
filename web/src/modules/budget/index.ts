@@ -5,6 +5,7 @@ import { HttpBudgetRepository } from "./infrastructure/HttpBudgetRepository";
 
 /** Public API for other modules (studios, campaign detail). */
 export { useEstimate } from "./application/useEstimate";
+export { useCampaignBudget } from "./application/useBudgetSettings";
 export type { BudgetRepository } from "./application/ports";
 export type { Budget, BudgetLimits, Estimate, EstimateKind, EstimateLine, EstimateRequest } from "./domain/budget";
 export { EstimateBudgetBanner } from "./presentation/components/EstimateBudgetBanner";

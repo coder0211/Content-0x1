@@ -103,6 +103,7 @@ describe("Brand Studio", () => {
     await user.type(within(form).getByLabelText(/Loại giấy phép/), "commercial");
     await user.click(within(form).getByRole("button", { name: "Tải lên tài nguyên" }));
     const table = await screen.findByRole("table", { name: "Tài nguyên brand" });
-    expect(await within(table).findByText("Hợp lệ")).toBeInTheDocument();
+    // The seed has one licensed track already; the upload adds a second one.
+    await waitFor(() => expect(within(table).getAllByText("Hợp lệ")).toHaveLength(2));
   });
 });

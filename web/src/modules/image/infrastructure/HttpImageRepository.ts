@@ -7,7 +7,6 @@ import type {
   EstimateQuery,
   ImageRepository,
   JobAccepted,
-  PromptSuggestionResult,
   TargetOption,
   VariationInput,
 } from "../application/ports";
@@ -22,7 +21,6 @@ import {
   type ImageEstimateDto,
   type ImageReferenceDto,
   type JobAcceptedDto,
-  type JobDto,
   type UploadTicketDto,
 } from "./dto";
 
@@ -108,18 +106,11 @@ export class HttpImageRepository implements ImageRepository {
     return done.id ?? ticket.file_id;
   }
 
-  async requestPromptSuggestions(input: { campaignId?: ID; preset: Preset }, idempotencyKey: string): Promise<ID> {
-    const d = await http.post<JobAcceptedDto>(
-      "/images/prompt-suggestions",
-      { campaign_id: input.campaignId ?? null, preset: input.preset },
-      { idempotencyKey },
-    );
+  async requestPromptSuggestions(input: { campaignId?: ID; brandId?: ID; preset: Preset }, idempotencyKey: string): Promise<ID> {
+    // ContentImagePromptRequest needs campaign_id or brand_id (brand-only studio target has no campaign).
+    const body = input.campaignId ? { campaign_id: input.campaignId, preset: input.preset } : { brand_id: input.brandId ?? null, preset: input.preset };
+    const d = await http.post<JobAcceptedDto>("/images/prompt-suggestions", body, { idempotencyKey });
     return d.job_id;
-  }
-
-  async getPromptSuggestions(jobId: ID): Promise<PromptSuggestionResult> {
-    const j = await http.get<JobDto>(`/jobs/${jobId}`);
-    return { status: j.status, prompts: j.result?.prompts ?? [], errorKind: j.error?.kind ?? null };
   }
 
   async retryJob(jobId: ID): Promise<void> {

@@ -124,7 +124,7 @@ func (s *Service) RunScene(ctx context.Context, sc jobuc.StepContext) (jobuc.Ste
 	if err != nil {
 		return jobuc.StepResult{}, err
 	}
-	if scene.IsReady() && !(in.Force && scene.AttemptCount <= in.BaseAttempt) {
+	if scene.IsReady() && (!in.Force || scene.AttemptCount > in.BaseAttempt) {
 		return jobuc.StepResult{Output: sceneOutput(scene, true)}, nil
 	}
 	if cancelled, err := sc.CancelRequested(ctx); err == nil && cancelled {

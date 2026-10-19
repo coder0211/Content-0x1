@@ -107,14 +107,6 @@ export interface UploadTicketDto {
   expires_at: string;
 }
 
-/** GET /jobs/{id} (SPEC-04 §2.7) — only the fields Image Studio reads. */
-export interface JobDto {
-  id: string;
-  status: JobStatus;
-  result: { prompts?: string[] } | null;
-  error: { code?: string; kind?: string; message?: string } | null;
-}
-
 export interface CampaignDto {
   id: string;
   name: string;

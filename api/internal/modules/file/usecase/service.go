@@ -136,7 +136,13 @@ func (s *Service) CompleteUpload(ctx context.Context, actor kernel.Actor, id ker
 		return File{}, verr
 	}
 	if err := s.Repo.MarkReady(ctx, f.ID, v); err != nil {
+		_ = s.Storage.Delete(ctx, v.StorageKey)
 		return File{}, err
+	}
+	if v.StorageKey != "" && v.StorageKey != f.StorageKey {
+		if err := s.Storage.Delete(ctx, f.StorageKey); err != nil {
+			s.Logger.WarnContext(ctx, "delete verified upload source", "file_id", f.ID, "error", err)
+		}
 	}
 	return s.Get(ctx, f.ID)
 }
@@ -158,72 +164,90 @@ func (s *Service) reject(ctx context.Context, f *domain.File, reason string, cau
 	return cause
 }
 
+// Image bounds (ACS-101): a tiny PNG may declare a huge canvas that
+// decodes to gigabytes in ffmpeg/kenburns workers (decompression bomb).
+const (
+	MaxImageSide   = 8192
+	MaxImagePixels = 40_000_000
+)
+
+// probeTimeout bounds ffprobe on an upload (runs in the API process).
+const probeTimeout = 60 * time.Second
+
+// verify downloads the uploaded object ONCE into a private temp file and
+// checks those bytes: magic bytes, image dimensions, or ffprobe streams.
+// The verified bytes are then stored under a new final key, so a second
+// PUT to the (still valid) presigned upload URL cannot swap the content
+// after verification (ACS-101). Workers and downloads read only the final
+// key; the upload key is deleted by the caller.
 func (s *Service) verify(ctx context.Context, f *domain.File, size int64) (Verified, error) {
-	head, err := s.Storage.Get(ctx, f.StorageKey, 0, domain.SniffLen)
+	r, err := s.Storage.Get(ctx, f.StorageKey, 0, 0)
 	if err != nil {
 		return Verified{}, err
 	}
-	buf, err := io.ReadAll(head)
-	_ = head.Close()
+	defer r.Close()
+	tmp, err := os.CreateTemp(s.TempDir, "acs-upload-*")
 	if err != nil {
 		return Verified{}, err
-	}
-	sniffed := domain.Sniff(buf)
-	if sniffed == "" || !domain.SniffMatches(f.MimeType, sniffed) {
-		return Verified{}, kernel.ErrUnsupportedMedia.WithDetails(kernel.Detail{"declared": f.MimeType, "detected": sniffed})
-	}
-	v := Verified{MimeType: f.MimeType, Kind: domain.KindOf(f.MimeType), SizeBytes: size}
-	switch v.Kind {
-	case domain.KindVideo, domain.KindAudio:
-		err = s.probe(ctx, f, &v)
-	default:
-		err = s.hashAndMeasure(ctx, f, &v)
-	}
-	return v, err
-}
-
-func (s *Service) hashAndMeasure(ctx context.Context, f *domain.File, v *Verified) error {
-	r, err := s.Storage.Get(ctx, f.StorageKey, 0, 0)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	h := sha256.New()
-	tee := io.TeeReader(r, h)
-	if v.Kind == domain.KindImage && v.MimeType != "image/svg+xml" {
-		cfg, _, err := image.DecodeConfig(tee)
-		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
-			return kernel.ErrUnsupportedMedia.WithDetails(kernel.FieldIssue("file", "corrupt_image"))
-		}
-		v.Width, v.Height = cfg.Width, cfg.Height
-	}
-	if _, err := io.Copy(io.Discard, tee); err != nil {
-		return err
-	}
-	v.Checksum = hex.EncodeToString(h.Sum(nil))
-	return nil
-}
-
-// probe downloads the object to a private temp file (no external URLs:
-// SSRF rule) and runs ffprobe on it.
-func (s *Service) probe(ctx context.Context, f *domain.File, v *Verified) error {
-	r, err := s.Storage.Get(ctx, f.StorageKey, 0, 0)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-	tmp, err := os.CreateTemp(s.TempDir, "acs-probe-*")
-	if err != nil {
-		return err
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), r); err != nil {
-		return err
+	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, size+1))
+	if err != nil {
+		return Verified{}, err
 	}
-	v.Checksum = hex.EncodeToString(h.Sum(nil))
-	info, err := s.Prober.Probe(ctx, tmp.Name())
+	if n != size {
+		return Verified{}, kernel.ErrFileTooLarge.WithDetails(kernel.FieldIssue("file", "size_mismatch"))
+	}
+	head := make([]byte, domain.SniffLen)
+	hn, _ := tmp.ReadAt(head, 0)
+	sniffed := domain.Sniff(head[:hn])
+	if sniffed == "" || !domain.SniffMatches(f.MimeType, sniffed) {
+		return Verified{}, kernel.ErrUnsupportedMedia.WithDetails(kernel.Detail{"declared": f.MimeType, "detected": sniffed})
+	}
+	v := Verified{MimeType: f.MimeType, Kind: domain.KindOf(f.MimeType), SizeBytes: size, Checksum: hex.EncodeToString(h.Sum(nil))}
+	switch v.Kind {
+	case domain.KindVideo, domain.KindAudio:
+		err = s.probe(ctx, tmp.Name(), &v)
+	case domain.KindImage:
+		if v.MimeType != "image/svg+xml" {
+			err = measureImage(tmp, &v)
+		}
+	}
+	if err != nil {
+		return Verified{}, err
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return Verified{}, err
+	}
+	v.StorageKey = s.key("files", f.ID)
+	if err := s.Storage.Put(ctx, v.StorageKey, tmp, size, f.MimeType); err != nil {
+		return Verified{}, err
+	}
+	return v, nil
+}
+
+// measureImage reads the dimensions and rejects corrupt or oversized images.
+func measureImage(r io.ReaderAt, v *Verified) error {
+	cfg, _, err := image.DecodeConfig(io.NewSectionReader(r, 0, v.SizeBytes))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return kernel.ErrUnsupportedMedia.WithDetails(kernel.FieldIssue("file", "corrupt_image"))
+	}
+	if cfg.Width > MaxImageSide || cfg.Height > MaxImageSide || cfg.Width*cfg.Height > MaxImagePixels {
+		return kernel.ErrFileTooLarge.WithDetails(kernel.Detail{"field": "file", "issue": "dimensions_too_large",
+			"max_side": MaxImageSide, "max_pixels": MaxImagePixels})
+	}
+	v.Width, v.Height = cfg.Width, cfg.Height
+	return nil
+}
+
+// probe runs ffprobe on the private temp copy (no external URLs: SSRF
+// rule), bounded by probeTimeout.
+func (s *Service) probe(ctx context.Context, path string, v *Verified) error {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
+	info, err := s.Prober.Probe(ctx, path)
 	if err != nil {
 		return kernel.ErrUnsupportedMedia.WithDetails(kernel.FieldIssue("file", "unreadable_media")).Wrap(err)
 	}
@@ -353,6 +377,11 @@ func (s *Service) SignedURL(ctx context.Context, id kernel.ID, downloadName stri
 	f, err := s.RequireReady(ctx, id)
 	if err != nil {
 		return SignedURL{}, err
+	}
+	if downloadName == "" && domain.IsActiveContent(f.MimeType) {
+		// SVG (brand logos) can carry script: never let the storage origin
+		// render it as a document. <img src> still displays it (ACS-101).
+		downloadName = f.ID.String() + domain.ExtensionFor(f.MimeType)
 	}
 	p, err := s.Storage.PresignGet(ctx, f.StorageKey, ports.PresignGetOptions{TTL: s.URLTTL, DownloadName: downloadName})
 	if err != nil {

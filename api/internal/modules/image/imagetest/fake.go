@@ -71,7 +71,7 @@ func (r *Repo) List(_ context.Context, q usecase.BatchQuery) ([]domain.Batch, er
 		if q.CreatedBy != nil && b.CreatedBy != *q.CreatedBy {
 			continue
 		}
-		if q.After != nil && !(b.CreatedAt.Before(q.After.At) || (b.CreatedAt.Equal(q.After.At) && b.ID.String() < q.After.ID.String())) {
+		if q.After != nil && !b.CreatedAt.Before(q.After.At) && (!b.CreatedAt.Equal(q.After.At) || b.ID.String() >= q.After.ID.String()) {
 			continue
 		}
 		out = append(out, b)

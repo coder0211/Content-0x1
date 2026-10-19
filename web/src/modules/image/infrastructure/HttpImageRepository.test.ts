@@ -1,3 +1,4 @@
+import { http } from "@/shared/api/http";
 import { mockSession } from "@/shared/api/mock";
 import { ApiError } from "@/shared/kernel";
 import { defaultOptions } from "../domain/image";
@@ -53,9 +54,10 @@ describe("HttpImageRepository ↔ mocks (SPEC-04 §2.5)", () => {
     expect(variation.asset?.versionNo).toBe(2);
 
     const jobId = await repo.requestPromptSuggestions({ campaignId: MOCK_CAMPAIGN_ID, preset: "poster" }, KEY);
-    const s = await repo.getPromptSuggestions(jobId);
-    expect(s.status).toBe("succeeded");
-    expect(s.prompts).toHaveLength(3);
+    // The job is in the shared store, served by the job module's mocks.
+    const job = await http.get<{ status: string; result: { prompts: string[] } }>(`/jobs/${jobId}`);
+    expect(job.status).toBe("succeeded");
+    expect(job.result.prompts).toHaveLength(3);
   });
 
   it("hides another creator's asset (IDOR → 404)", async () => {

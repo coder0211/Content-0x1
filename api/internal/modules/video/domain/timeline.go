@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Slot is a scene's position on the final timeline.
@@ -177,7 +178,7 @@ func splitChunks(text string, maxChars int) []string {
 	var out []string
 	var cur []string
 	n := 0
-	for _, w := range words {
+	for _, w := range splitLongWords(words, maxChars) {
 		l := len([]rune(w))
 		if n > 0 && n+1+l > maxChars {
 			out = append(out, strings.Join(cur, " "))
@@ -193,6 +194,50 @@ func splitChunks(text string, maxChars int) []string {
 		out = append(out, strings.Join(cur, " "))
 	}
 	return out
+}
+
+// splitLongWords hard-splits words longer than maxChars runes so one
+// unbroken "word" cannot become a cue that runs off-screen (ACS-101).
+func splitLongWords(words []string, maxChars int) []string {
+	if maxChars <= 0 {
+		return words
+	}
+	out := make([]string, 0, len(words))
+	for _, w := range words {
+		r := []rune(w)
+		for len(r) > maxChars {
+			out = append(out, string(r[:maxChars]))
+			r = r[maxChars:]
+		}
+		out = append(out, string(r))
+	}
+	return out
+}
+
+// cleanSubtitleText removes characters that are never legitimate in a
+// caption: C0/C1 controls (line breaks become spaces) and Unicode bidi
+// overrides/isolates that can visually reorder text (ACS-101).
+func cleanSubtitleText(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		case (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) || r == 0x200E || r == 0x200F:
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// srtEscape neutralises markup SubRip renderers (and ffmpeg's srt →
+// mov_text conversion) interpret in cue text: HTML-like tags (<b>, <font>)
+// and ASS-style override blocks ({\an8}); "-->" cannot form a timing line
+// because cues are single-line.
+func srtEscape(s string) string {
+	r := strings.NewReplacer("<", "‹", ">", "›", "{", "(", "}", ")")
+	return r.Replace(cleanSubtitleText(s))
 }
 
 // minCueMs drops cues too short to read.
@@ -229,7 +274,7 @@ func srtTime(ms int) string {
 func SRT(cues []Cue) string {
 	var b strings.Builder
 	for i, c := range cues {
-		fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i+1, srtTime(c.StartMs), srtTime(c.EndMs), c.Text)
+		fmt.Fprintf(&b, "%d\n%s --> %s\n%s\n\n", i+1, srtTime(c.StartMs), srtTime(c.EndMs), srtEscape(c.Text))
 	}
 	return b.String()
 }
@@ -246,8 +291,8 @@ const SubtitleFont = "Noto Sans"
 // assEscape neutralises ASS override blocks and line-break escapes in user
 // text: braces start override tags and a backslash starts \N, \h...
 func assEscape(s string) string {
-	r := strings.NewReplacer("\\", "⧵", "{", "(", "}", ")", "\r", "", "\n", " ")
-	return r.Replace(s)
+	r := strings.NewReplacer("\\", "⧵", "{", "(", "}", ")")
+	return r.Replace(cleanSubtitleText(s))
 }
 
 // ASS renders cues as an Advanced SubStation file styled for preset p

@@ -8,13 +8,24 @@ import type {
   CreatePricingDto,
   CreateUserDto,
   ModelDto,
-  PricingDto,
+  PricingVersionDto,
   ProviderDto,
   UpdateModelDto,
   UpdateProviderDto,
   UpdateUserDto,
   UserDto,
 } from "./dto";
+
+/** Internal store row: one unit of one pricing version (the API groups rows into versions). */
+interface PricingRowStore {
+  model_id: string;
+  pricing_version: string;
+  unit: string;
+  unit_price: string;
+  currency: string;
+  effective_from: string;
+  effective_to: string | null;
+}
 
 /* In-memory stores (reset with resetSettingsMocks). Mirrors SPEC-04 §2.1 / §2.9 and the audit API. */
 
@@ -26,7 +37,7 @@ let users: UserDto[] = [];
 let audit: AuditLogDto[] = [];
 let providers: ProviderDto[] = [];
 let models: ModelDto[] = [];
-let pricing: PricingDto[] = [];
+let pricing: PricingRowStore[] = [];
 let auditSeq = 0;
 
 const T0 = Date.parse("2026-10-18T08:00:00Z");
@@ -117,13 +128,13 @@ function provider(
   id: string,
   code: string,
   name: string,
-  kind: ProviderDto["kind"],
+  kinds: ProviderDto["kinds"],
   secretRef: string,
   configured: boolean,
   config: Record<string, unknown>,
   status: ActiveStatus = "active",
 ): ProviderDto {
-  return { id, code, name, kind, status, secret_ref: secretRef, secret_configured: configured, config_json: config, created_at: iso(60 * 24 * 60), updated_at: iso(60 * 24) };
+  return { id, code, name, kinds, status, secret_ref: secretRef, secret_configured: configured, adapter_available: true, config_json: config, updated_at: iso(60 * 24) };
 }
 
 function model(
@@ -136,11 +147,47 @@ function model(
   concurrency: number,
   isDefault: boolean,
 ): ModelDto {
-  return { id, provider_id: providerId, provider_code: providerCode, model_code: code, kind, capabilities, concurrency_limit: concurrency, is_default: isDefault, status: "active" };
+  return {
+    id,
+    provider_id: providerId,
+    provider_code: providerCode,
+    provider_status: "active",
+    model_code: code,
+    kind,
+    capabilities,
+    concurrency_limit: concurrency,
+    is_default: isDefault,
+    status: "active",
+    adapter_available: true,
+    usable: true,
+  };
 }
 
-function price(modelId: string, version: string, unit: string, unitPrice: number, from: string, to: string | null): PricingDto {
-  return { id: uuid(), model_id: modelId, pricing_version: version, unit, unit_price: unitPrice, currency: "USD", effective_from: from, effective_to: to };
+function price(modelId: string, version: string, unit: string, unitPrice: number, from: string, to: string | null): PricingRowStore {
+  return { model_id: modelId, pricing_version: version, unit, unit_price: String(unitPrice), currency: "USD", effective_from: from, effective_to: to };
+}
+
+/** Groups store rows into `AIPricingVersion`s, newest effective_from first. */
+function pricingVersions(modelId: string): PricingVersionDto[] {
+  const now = Date.now();
+  const byVersion = new Map<string, PricingRowStore[]>();
+  for (const r of pricing) {
+    if (r.model_id !== modelId) continue;
+    byVersion.set(r.pricing_version, [...(byVersion.get(r.pricing_version) ?? []), r]);
+  }
+  return [...byVersion.values()]
+    .map((rows) => {
+      const f = rows[0]!;
+      return {
+        pricing_version: f.pricing_version,
+        currency: f.currency,
+        effective_from: f.effective_from,
+        effective_to: f.effective_to,
+        is_current: Date.parse(f.effective_from) <= now && (f.effective_to === null || Date.parse(f.effective_to) > now),
+        items: rows.map((r) => ({ unit: r.unit, unit_price: r.unit_price })),
+      };
+    })
+    .sort((a, b) => b.effective_from.localeCompare(a.effective_from));
 }
 
 function record(actor: { id: string; email: string }, action: string, resourceType: string, resourceId: string, before: unknown, after: unknown) {
@@ -170,8 +217,8 @@ function paginate<T>(items: T[], url: URL, defaultLimit = 20) {
 
 /** Secrets are never part of a response — strip anything that is not on the DTO allowlist. */
 function publicProvider(p: ProviderDto): ProviderDto {
-  const { id, code, name, kind, status, secret_ref, secret_configured, config_json, created_at, updated_at } = p;
-  return { id, code, name, kind, status, secret_ref, secret_configured, config_json, created_at, updated_at };
+  const { id, code, name, kinds, status, secret_ref, secret_configured, adapter_available, config_json, updated_at } = p;
+  return { id, code, name, kinds, status, secret_ref, secret_configured, adapter_available, config_json, updated_at };
 }
 
 seed();
@@ -310,8 +357,8 @@ export const handlers: HttpHandler[] = [
   rest.get(
     api("/settings/models"),
     withAuth("provider.view", ({ request }) => {
-      const pid = new URL(request.url).searchParams.get("provider_id");
-      return ok(models.filter((m) => !pid || m.provider_id === pid));
+      const kind = new URL(request.url).searchParams.get("kind");
+      return ok(models.filter((m) => !kind || m.kind === kind));
     }),
   ),
 
@@ -363,7 +410,7 @@ export const handlers: HttpHandler[] = [
     api("/settings/models/:id/pricing"),
     withAuth<{ id: string }>("provider.view", ({ params }) => {
       if (!models.some((m) => m.id === params.id)) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
-      return ok(pricing.filter((p) => p.model_id === params.id));
+      return ok(pricingVersions(params.id));
     }),
   ),
 
@@ -375,20 +422,22 @@ export const handlers: HttpHandler[] = [
       const details: { field: string; issue: string }[] = [];
       const version = (b.pricing_version ?? "").trim();
       if (!version) details.push({ field: "pricing_version", issue: "required" });
-      if (!b.effective_from || Number.isNaN(Date.parse(b.effective_from))) details.push({ field: "effective_from", issue: "invalid" });
-      if (!b.prices?.length) details.push({ field: "prices", issue: "required" });
-      else if (b.prices.some((p) => !p.unit || !(p.unit_price >= 0))) details.push({ field: "prices", issue: "invalid" });
+      const from = b.effective_from ?? new Date().toISOString();
+      if (Number.isNaN(Date.parse(from))) details.push({ field: "effective_from", issue: "invalid" });
+      else if (Date.parse(from) < Date.now() - 5 * 60_000) details.push({ field: "effective_from", issue: "in_past" });
+      if (!b.items?.length) details.push({ field: "items", issue: "required" });
+      else if (b.items.some((p) => !p.unit || !(Number(p.unit_price) >= 0))) details.push({ field: "items", issue: "invalid" });
       if (details.length) return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", details);
       if (pricing.some((p) => p.model_id === params.id && p.pricing_version === version)) {
         return fail(409, "CONFLICT", "Phiên bản giá đã tồn tại", [{ field: "pricing_version", issue: "taken" }]);
       }
       // Append-only: close the current version (effective_to), never edit its prices.
-      for (const p of pricing) if (p.model_id === params.id && p.effective_to === null) p.effective_to = b.effective_from!;
-      const rows = b.prices!.map((p) => price(params.id, version, p.unit, p.unit_price, b.effective_from!, null));
+      for (const p of pricing) if (p.model_id === params.id && p.effective_to === null) p.effective_to = from;
+      const rows = b.items!.map((p) => price(params.id, version, p.unit, Number(p.unit_price), from, null));
       for (const r of rows) r.currency = b.currency ?? "USD";
       pricing.push(...rows);
-      record(user, "pricing.create", "model", params.id, null, { pricing_version: version, prices: b.prices });
-      return ok(rows, { status: 201 });
+      record(user, "pricing.create", "model", params.id, null, { pricing_version: version, items: b.items });
+      return ok(pricingVersions(params.id).find((v) => v.pricing_version === version)!, { status: 201 });
     }),
   ),
 ];

@@ -15,7 +15,9 @@ SELECT * FROM asset_files WHERE id = ANY(@ids::uuid[]);
 -- name: MarkFileReady :exec
 UPDATE asset_files
 SET upload_status = 'ready', mime_type = @mime_type, kind = @kind, size_bytes = @size_bytes,
-    checksum_sha256 = @checksum_sha256, width = @width, height = @height, duration_ms = @duration_ms
+    checksum_sha256 = @checksum_sha256, width = @width, height = @height, duration_ms = @duration_ms,
+    -- verified bytes live under a key the browser never had a PUT URL for (ACS-101)
+    storage_key = COALESCE(sqlc.narg('storage_key')::text, storage_key)
 WHERE id = @id AND upload_status = 'pending';
 
 -- name: MarkFileRejected :exec

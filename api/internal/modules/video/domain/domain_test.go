@@ -122,7 +122,7 @@ func TestRenderStepsDAG(t *testing.T) {
 			t.Errorf("%s must run before render", k)
 		}
 	}
-	if !(pos[domain.StepVoiceover] < pos[domain.StepSubtitle] && pos[domain.StepRender] < pos[domain.StepQC] && pos[domain.StepQC] < pos[domain.StepPublish]) {
+	if pos[domain.StepVoiceover] >= pos[domain.StepSubtitle] || pos[domain.StepRender] >= pos[domain.StepQC] || pos[domain.StepQC] >= pos[domain.StepPublish] {
 		t.Errorf("bad order %v", order)
 	}
 	var render domain.StepNode
@@ -321,5 +321,36 @@ func TestFingerprints(t *testing.T) {
 	st := domain.SubtitleSettings{Enabled: true, Language: "vi", Style: "burn_in"}
 	if domain.SubtitleFingerprint(sc, st, a, "square") == domain.SubtitleFingerprint(sc, st, a, "landscape") {
 		t.Error("preset must change the subtitle fingerprint")
+	}
+}
+
+// ACS-101: special characters in subtitle text — markup, override blocks,
+// controls, bidi overrides, CR/LF and "-->" — cannot alter the SRT/ASS
+// structure; Vietnamese diacritics survive; long words are hard-split.
+func TestSubtitleSpecialCharacters(t *testing.T) {
+	text := "Giảm <font color=red>50%</font> {\\an8}ngay\r\n2\n00:00:00,000 --> 00:00:09,000\x07\u202Eabc Ưu đãi hè " + strings.Repeat("x", 100)
+	cues := domain.BuildCues([]domain.Scene{{ID: kernel.NewID(), DurationMs: 8000, SubtitleText: text}}, nil)
+	srt := domain.SRT(cues)
+	for _, bad := range []string{"<font", "{\\an8}", "\x07", "\u202E", "\r"} {
+		if strings.Contains(srt, bad) {
+			t.Errorf("SRT contains %q:\n%s", bad, srt)
+		}
+	}
+	// Exactly one timing line per cue: user "-->" never starts a line.
+	timing := 0
+	for _, l := range strings.Split(srt, "\n") {
+		if strings.Contains(l, " --> ") && strings.HasPrefix(l, "00:") && !strings.Contains(l, "Giảm") {
+			timing++
+		}
+		if len([]rune(l)) > 42 {
+			t.Errorf("cue line longer than 42 runes: %q", l)
+		}
+	}
+	if timing != len(cues) || !strings.Contains(srt, "Ưu") || !strings.Contains(srt, "đãi hè") {
+		t.Fatalf("timing lines %d for %d cues:\n%s", timing, len(cues), srt)
+	}
+	ass := domain.ASS(cues, domain.Presets["social_vertical"])
+	if strings.Contains(ass, "{\\an8}") || strings.Contains(ass, "\u202E") || !strings.Contains(ass, "đãi hè") {
+		t.Fatalf("ASS not escaped:\n%s", ass)
 	}
 }

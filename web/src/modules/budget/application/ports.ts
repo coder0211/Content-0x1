@@ -14,6 +14,8 @@ export interface BudgetRepository {
   usageSummary(q: UsageSummaryQuery): Promise<UsageSummary>;
   getSettings(): Promise<BudgetSettings>;
   updateSettings(patch: BudgetSettingsPatch): Promise<BudgetSettings>;
+  /** GET /campaigns/{id}/budget — `null` when the campaign has no budget. */
+  getCampaignBudget(campaignId: string): Promise<Budget | null>;
   putCampaignBudget(campaignId: string, input: CampaignBudgetInput): Promise<Budget>;
 }
 

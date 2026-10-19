@@ -170,3 +170,26 @@ func ValidateUploadRequest(p Purpose, filename, mime string, size int64, l Limit
 	}
 	return nil
 }
+
+// IsActiveContent reports MIME types a browser would execute as a document
+// (script-capable) when opened directly from the storage origin.
+func IsActiveContent(mime string) bool {
+	switch mime {
+	case "image/svg+xml", "text/html", "application/xhtml+xml", "text/xml", "application/xml":
+		return true
+	}
+	return false
+}
+
+// ExtensionFor returns a file extension for the MIME types served here.
+func ExtensionFor(mime string) string {
+	switch mime {
+	case "image/svg+xml":
+		return ".svg"
+	case "text/html", "application/xhtml+xml":
+		return ".html"
+	case "text/xml", "application/xml":
+		return ".xml"
+	}
+	return ""
+}

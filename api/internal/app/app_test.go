@@ -65,3 +65,31 @@ func TestCategoryFor(t *testing.T) {
 		}
 	}
 }
+
+type nopMailer struct{}
+
+func (nopMailer) Send(context.Context, []string, string, string) error { return nil }
+
+// The worker composition delivers budget alert e-mails: with a mailer
+// (app.New sets mail.New(cfg.SMTP)) the budget module contributes the
+// budget-alert-mail runner to the worker, and only to the worker.
+func TestWorkerComposesBudgetAlertMailer(t *testing.T) {
+	for _, tc := range []struct {
+		process registry.Process
+		want    bool
+	}{{registry.ProcessWorker, true}, {registry.ProcessServer, false}} {
+		c := &registry.Container{Platform: registry.Platform{Process: tc.process, Mailer: nopMailer{},
+			Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}}
+		mods, err := Compose(c, Modules)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, r := range Runners(&App{Container: c, Modules: mods}) {
+			found = found || r.Name == "budget-alert-mail"
+		}
+		if found != tc.want {
+			t.Errorf("%s: budget-alert-mail runner present=%v, want %v", tc.process, found, tc.want)
+		}
+	}
+}

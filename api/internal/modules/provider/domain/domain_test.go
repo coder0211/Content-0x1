@@ -12,7 +12,7 @@ import (
 )
 
 func TestSecretRefAndConfig(t *testing.T) {
-	for ref, ok := range map[string]bool{"OPENAI_API_KEY": true, "none": true, "sk-abc123": false, "": false, "openai_key": false} {
+	for ref, ok := range map[string]bool{"OPENAI_API_KEY": true, "GOOGLE_TTS_CREDENTIALS": true, "none": true, "sk-abc123": false, "": false, "openai_key": false, "DATABASE_URL": false, "S3_SECRET_KEY": false, "HOME": false} {
 		var v kernel.ValidationErrors
 		ValidateSecretRef(&v, ref)
 		if (v.Err() == nil) != ok {

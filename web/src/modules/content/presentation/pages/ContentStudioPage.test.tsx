@@ -2,10 +2,10 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http as mswHttp } from "msw";
 import { server } from "@/app/mocks/server";
-import { api, fail, mockSession, ok } from "@/shared/api/mock";
+import { api, fail, mockSession } from "@/shared/api/mock";
 import { renderApp } from "@/test/render";
+import { MOCK_CAMPAIGN_ID } from "@/modules/campaign/infrastructure/mocks";
 import {
-  MOCK_CAMPAIGN,
   resetContentMocks,
   setContentMockPolls,
 } from "../../infrastructure/mocks";
@@ -148,13 +148,9 @@ describe("Content Studio", { timeout: 30000 }, () => {
 
   it("uses the campaign brief when opened with ?campaign_id", async () => {
     mockSession.signInAs("creator@acs.local");
-    // The campaign module's mock owns /campaigns/:id; serve this module's fixture explicitly.
-    server.use(
-      mswHttp.get(api("/campaigns/:id"), () => ok(MOCK_CAMPAIGN)),
-    );
-    renderApp(`/content?campaign_id=${MOCK_CAMPAIGN.id}`);
+    renderApp(`/content?campaign_id=${MOCK_CAMPAIGN_ID}`);
     expect(
-      await screen.findByText(MOCK_CAMPAIGN.name, undefined, { timeout: 5000 }),
+      await screen.findByText("Khóa giao tiếp T11", undefined, { timeout: 5000 }),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Brand", { selector: "label" }),

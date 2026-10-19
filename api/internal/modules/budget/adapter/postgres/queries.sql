@@ -112,7 +112,9 @@ UPDATE budget_reservations SET status = @status, settled_at = @settled_at WHERE 
 -- name: InsertUsage :exec
 INSERT INTO ai_usage_records (id, job_id, step_id, campaign_id, user_id, provider_code, model_code, job_type,
                               usage_json, cost_amount, cost_source, currency, pricing_version, occurred_at)
-VALUES (@id, @job_id, @step_id, @campaign_id, @user_id, @provider_code, @model_code, @job_type,
+VALUES (@id, @job_id, @step_id, @campaign_id, @user_id, @provider_code, @model_code,
+        -- job_type is denormalised for group_by=job_type; fall back to the job's type when a caller omits it.
+        COALESCE(sqlc.narg('job_type')::text, (SELECT j.job_type FROM ai_jobs j WHERE j.id = @job_id)),
         @usage_json, @cost_amount, @cost_source, @currency, @pricing_version, @occurred_at);
 
 -- name: UnsettledUsage :one

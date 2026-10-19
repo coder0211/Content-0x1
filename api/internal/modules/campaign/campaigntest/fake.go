@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/be/acs/api/internal/modules/campaign/domain"
 	"github.com/be/acs/api/internal/modules/campaign/usecase"
 	"github.com/be/acs/api/internal/shared/kernel"
 )
@@ -31,6 +32,11 @@ func (a *API) GetCampaignForGeneration(_ context.Context, actor kernel.Actor, id
 	if !ok {
 		return usecase.CampaignForGeneration{}, kernel.ErrNotFound
 	}
+	// Same membership rule as the real service (creator/member or
+	// Lead/Admin). Fixtures without CreatedBy stay open to everyone.
+	if c.CreatedBy != kernel.NilID && !actor.IsLeadOrAdmin() && c.CreatedBy != actor.UserID && !slices.Contains(c.MemberIDs, actor.UserID) {
+		return usecase.CampaignForGeneration{}, kernel.ErrForbidden
+	}
 	if c.Status == usecase.StatusArchived || c.Status == usecase.StatusCompleted {
 		return usecase.CampaignForGeneration{}, kernel.InvalidTransition(string(c.Status), "generate")
 	}
@@ -48,6 +54,11 @@ func (a *API) IsMember(_ context.Context, id, userID kernel.ID) (bool, error) {
 func (a *API) SaveContentPlanProposal(_ context.Context, id kernel.ID, plan json.RawMessage) error {
 	if _, ok := a.Campaigns[id]; !ok {
 		return kernel.ErrNotFound
+	}
+	// Same contract as the real service: the proposal must decode as a
+	// campaign plan (domain.ParsePlan), otherwise VALIDATION_FAILED.
+	if p, err := domain.ParsePlan(plan); err != nil || p == nil {
+		return kernel.Validation(kernel.FieldIssue("plan", "invalid"))
 	}
 	a.Proposals[id] = plan
 	return nil

@@ -1,35 +1,32 @@
 import type { HttpHandler } from "msw";
-import { accepted, api, fail, mockSession, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { accepted, api, fail, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { mockAssets, type MockAssetFileDto } from "@/shared/api/mock-assets";
+import {
+  advanceMockJob,
+  allMockJobs,
+  createMockJob,
+  findMockJob,
+  finishMockJob,
+  isTerminalJob,
+} from "@/shared/api/mock-jobs";
 import { uuid } from "@/shared/lib/id";
-import type {
-  BrandDto,
-  CampaignDto,
-  GenerationRequestDto,
-  ImageBatchDto,
-  ImageEstimateDto,
-  ImageFileDto,
-  ImageReferenceDto,
-  JobDto,
-  UploadTicketDto,
-} from "./dto";
+import type { GenerationRequestDto, ImageBatchDto, ImageEstimateDto, ImageFileDto, ImageReferenceDto } from "./dto";
 
 /**
  * Image Studio mocks (SPEC-04 §2.5 + the image-specific endpoints in api/openapi/image.yaml).
- * Also answers, only as a fallback, the few foreign endpoints the Studio calls
- * (`/campaigns`, `/brands`, `/files/*`, `/jobs/{id}` of prompt-suggestion jobs,
- * `/assets/{id}/submit-review` of image assets): handlers registered earlier by the
- * owning modules win, and ids this store does not know fall through to later handlers.
+ * Jobs live in the shared job store (`@/shared/api/mock-jobs`: GET/retry/cancel are served by the
+ * job module's mocks) and finished images are published to the shared asset store
+ * (`@/shared/api/mock-assets`: submit-review/review/download are served by the library mocks).
+ * Campaigns, brands and file uploads come from the campaign/brand mocks.
  */
 
-export const MOCK_BRAND_ID = "6b0f3a52-1c1e-4d7b-9a61-0000000000b1";
-export const MOCK_CAMPAIGN_ID = "6b0f3a52-1c1e-4d7b-9a61-0000000000c1";
-export const MOCK_EMPTY_CAMPAIGN_ID = "6b0f3a52-1c1e-4d7b-9a61-0000000000c2";
-
-const CAMPAIGNS: CampaignDto[] = [
-  { id: MOCK_CAMPAIGN_ID, name: "Khai giảng IELTS tháng 11", brand_id: MOCK_BRAND_ID, status: "in_progress" },
-  { id: MOCK_EMPTY_CAMPAIGN_ID, name: "Tết 2027 — Ưu đãi học phí", brand_id: MOCK_BRAND_ID, status: "draft" },
-];
-const BRANDS: BrandDto[] = [{ id: MOCK_BRAND_ID, name: "Anh ngữ Sao Mai" }];
+/** Seed brand + campaigns of the brand/campaign mocks. */
+export const MOCK_BRAND_ID = "10000000-0000-4000-8000-000000000001";
+export const MOCK_CAMPAIGN_ID = "20000000-0000-4000-8000-000000000001";
+export const MOCK_EMPTY_CAMPAIGN_ID = "20000000-0000-4000-8000-000000000002";
+const CREATOR_ID = "00000000-0000-4000-8000-000000000003";
+/** Wall-clock duration of each simulated job step. */
+const STEP_MS = 1200;
 
 /** Price per image by unit (matches the fake provider seed, pricing fake-2026-10). */
 const PRICES: Record<string, number> = { image_1024_standard: 0.04, image_1024_high: 0.17, image_1536_standard: 0.06, image_1536_high: 0.25 };
@@ -45,10 +42,8 @@ const DEFAULT_CAPS: Caps = { aspectRatios: ["1:1", "4:5", "9:16", "16:9"], quali
 
 interface State {
   batches: ImageBatchDto[];
-  suggestionJobs: Map<string, { createdBy: string; prompts: string[] }>;
   /** batch id → asset id an edit/variation adds a version to. */
   targetAsset: Map<string, string>;
-  files: Map<string, { mime: string; name: string }>;
   caps: Caps;
   perJobLimit: number;
 }
@@ -89,9 +84,35 @@ function makeFiles(ratio: string, count: number, parent: string | null, seed: nu
   });
 }
 
-function seedBatch(): ImageBatchDto {
-  const createdBy = "00000000-0000-4000-8000-000000000003";
+function toAssetFiles(images: ImageFileDto[]): MockAssetFileDto[] {
+  return images.map((i) => ({
+    file_id: i.file_id,
+    role: i.role,
+    sort_order: i.sort_order,
+    mime_type: i.mime_type,
+    kind: "image",
+    width: i.width,
+    height: i.height,
+    duration_ms: null,
+    url: i.url,
+  }));
+}
+
+function imageContent(b: ImageBatchDto, images: ImageFileDto[]) {
   return {
+    prompt: b.prompt,
+    preset: b.preset,
+    aspect_ratio: b.aspect_ratio,
+    quality: b.quality,
+    file_ids: images.map((i) => i.file_id),
+    requires_typography_check: b.preset === "poster",
+  };
+}
+
+function seedBatch(): ImageBatchDto {
+  const createdAt = new Date(Date.now() - 3600_000).toISOString();
+  const job = createMockJob({ type: "image_generation", status: "succeeded", createdBy: CREATOR_ID, campaignId: MOCK_CAMPAIGN_ID, modelCode: "fake-image", estimate: 0.12, createdAt });
+  const b: ImageBatchDto = {
     id: uuid(),
     operation: "generate",
     campaign_id: MOCK_CAMPAIGN_ID,
@@ -103,19 +124,48 @@ function seedBatch(): ImageBatchDto {
     count: 2,
     model_code: "fake-image",
     source_file_id: null,
-    created_by: createdBy,
-    created_at: new Date(Date.now() - 3600_000).toISOString(),
-    job: { id: uuid(), status: "succeeded", progress: 100, error_code: null, error_kind: null, error_message: null, cost_estimate: { amount: 0.12, currency: "USD", is_estimate: true }, cost_actual: { amount: 0.12, currency: "USD", is_estimate: false } },
+    created_by: CREATOR_ID,
+    created_at: createdAt,
+    job: { id: job.id, status: "succeeded", progress: 100, error_code: null, error_kind: null, error_message: null, cost_estimate: { amount: 0.12, currency: "USD", is_estimate: true }, cost_actual: { amount: 0.12, currency: "USD", is_estimate: false } },
     asset: { id: uuid(), title: "Poster khai giảng khóa IELTS", status: "draft", version_no: 1, current_version_no: 1, requires_typography_check: true, images: makeFiles("4:5", 2, null, 0) },
   };
+  publish(b);
+  return b;
 }
 
-const fresh = (): State => ({ batches: [seedBatch()], suggestionJobs: new Map(), targetAsset: new Map(), files: new Map(), caps: { ...DEFAULT_CAPS }, perJobLimit: 2 });
+/** Publishes a finished batch to the shared asset store (new asset or new version). */
+function publish(b: ImageBatchDto): void {
+  const asset = b.asset!;
+  const existing = mockAssets.find(asset.id);
+  const input = { content: imageContent(b, asset.images), files: toAssetFiles(asset.images), jobId: b.job.id, jobType: b.operation === "generate" ? "image_generation" : "image_edit", createdBy: b.created_by };
+  if (existing) {
+    const v = mockAssets.addVersion(existing, { ...input, changeNote: b.operation === "edit" ? "Chỉnh sửa ảnh bởi AI" : "Thêm biến thể bởi AI" });
+    asset.version_no = v.version_no;
+    asset.current_version_no = v.version_no;
+    return;
+  }
+  mockAssets.create({
+    id: asset.id,
+    type: "image",
+    subtype: b.preset === "poster" ? "poster" : b.preset,
+    title: asset.title,
+    campaignId: b.campaign_id,
+    brandId: b.brand_id,
+    ...input,
+    changeNote: "Tạo bởi AI",
+  });
+}
+
+const fresh = (): State => ({ batches: [], targetAsset: new Map(), caps: { ...DEFAULT_CAPS }, perJobLimit: 2 });
 let state = fresh();
+state.batches.push(seedBatch());
 
 /** Test helper: restore the seed data. */
 export function resetImageMocks(): void {
+  const ids = new Set(state.batches.map((b) => b.asset?.id).filter(Boolean));
+  mockAssets.replace(mockAssets.all().filter((a) => !ids.has(a.summary.id)));
   state = fresh();
+  state.batches.push(seedBatch());
 }
 
 /** Test helper: restrict the mock model (422 CAPABILITY_NOT_SUPPORTED). */
@@ -128,16 +178,26 @@ export function setImageMockPerJobLimit(amount: number): void {
   state.perJobLimit = amount;
 }
 
+function activeJobs() {
+  const ids = new Set(state.batches.map((b) => b.job.id));
+  return allMockJobs().filter((j) => ids.has(j.dto.id) && !isTerminalJob(j.dto.status));
+}
+
 /** Test helper: finish every active job now. */
 export function completeImageMockJobs(): void {
-  for (const b of state.batches) if (b.job.status === "queued" || b.job.status === "running") finish(b);
+  for (const j of activeJobs()) {
+    j.sim = { startedAt: 0, stepMs: 0 };
+    j.dto.status = "running";
+    advanceMockJob(j);
+  }
 }
 
 /** Test helper: fail every active job with the given provider error kind. */
 export function failImageMockJobs(kind = "ContentPolicy"): void {
-  for (const b of state.batches) {
-    if (b.job.status !== "queued" && b.job.status !== "running") continue;
-    b.job = { ...b.job, status: "failed", error_code: "PROVIDER_ERROR", error_kind: kind, error_message: "provider rejected" };
+  for (const j of activeJobs()) {
+    const st = j.dto.steps.find((x) => x.status !== "succeeded");
+    if (st) Object.assign(st, { status: "failed", error_kind: kind, error_message: "provider rejected", attempt_count: 1 });
+    finishMockJob(j, "failed", new Date(), { code: "STEP_FAILED", message: "provider rejected" });
   }
 }
 
@@ -173,6 +233,7 @@ function budgetError(amount: number, override: boolean, roles: readonly string[]
 function finish(b: ImageBatchDto): void {
   const actual = b.job.cost_estimate ? { ...b.job.cost_estimate, is_estimate: false } : null;
   b.job = { ...b.job, status: "succeeded", progress: 100, cost_actual: actual };
+  b.created_at = b.created_at || new Date().toISOString();
   const seed = state.batches.length * 3;
   if (b.operation === "generate") {
     b.asset = {
@@ -184,6 +245,7 @@ function finish(b: ImageBatchDto): void {
       requires_typography_check: b.preset === "poster",
       images: makeFiles(b.aspect_ratio, b.count, null, seed),
     };
+    publish(b);
     return;
   }
   // edit / variation: a new version of the source asset.
@@ -200,16 +262,28 @@ function finish(b: ImageBatchDto): void {
     requires_typography_check: b.preset === "poster",
     images,
   };
-  for (const x of state.batches) if (x.asset?.id === b.asset.id) x.asset.current_version_no = versionNo;
+  publish(b);
+  for (const x of state.batches) if (x.asset?.id === b.asset.id) x.asset.current_version_no = b.asset.version_no;
 }
 
-/** Each gallery poll moves active jobs forward: queued → running 30% → 75% → succeeded. */
-function advance(): void {
-  for (const b of state.batches) {
-    if (b.job.status === "queued") b.job = { ...b.job, status: "running", progress: 30 };
-    else if (b.job.status === "running" && b.job.progress < 75) b.job = { ...b.job, progress: 75 };
-    else if (b.job.status === "running") finish(b);
+/** Mirrors the shared job (advanced by wall clock) and the shared asset status into the batch. */
+function sync(b: ImageBatchDto): void {
+  const j = findMockJob(b.job.id);
+  if (j) {
+    advanceMockJob(j);
+    const failed = j.dto.steps.find((x) => x.status === "failed");
+    if (j.dto.status !== "succeeded") {
+      b.job = {
+        ...b.job,
+        status: j.dto.status,
+        progress: j.dto.progress,
+        error_code: j.dto.error?.code ?? null,
+        error_kind: failed?.error_kind ?? null,
+        error_message: j.dto.error?.message ?? failed?.error_message ?? null,
+      };
+    }
   }
+  if (b.asset) b.asset.status = mockAssets.find(b.asset.id)?.summary.status ?? b.asset.status;
 }
 
 function newBatch(init: Pick<ImageBatchDto, "operation" | "campaign_id" | "brand_id" | "prompt" | "preset" | "aspect_ratio" | "quality" | "count" | "source_file_id" | "created_by">, assetId: string | null, cost: number): ImageBatchDto {
@@ -218,9 +292,27 @@ function newBatch(init: Pick<ImageBatchDto, "operation" | "campaign_id" | "brand
     id: uuid(),
     model_code: "fake-image",
     created_at: new Date().toISOString(),
-    job: { id: uuid(), status: "queued", progress: 0, error_code: null, error_kind: null, error_message: null, cost_estimate: { amount: cost, currency: "USD", is_estimate: true }, cost_actual: null },
+    job: { id: "", status: "queued", progress: 0, error_code: null, error_kind: null, error_message: null, cost_estimate: { amount: cost, currency: "USD", is_estimate: true }, cost_actual: null },
     asset: null, // pending edits/variations show no images until the job finishes
   };
+  const job = createMockJob({
+    type: init.operation === "generate" ? "image_generation" : "image_edit",
+    createdBy: init.created_by,
+    campaignId: init.campaign_id,
+    assetId,
+    modelCode: "fake-image",
+    estimate: cost,
+    steps: [
+      ["generate", "image_generate"],
+      ["publish", "asset_publish_ready"],
+    ],
+    simulate: { stepMs: STEP_MS },
+    onSucceeded: () => {
+      finish(b);
+      return { asset_ids: [b.asset!.id] };
+    },
+  });
+  b.job.id = job.id;
   if (assetId) state.targetAsset.set(b.id, assetId);
   state.batches.unshift(b);
   return b;
@@ -248,7 +340,7 @@ export const handlers: HttpHandler[] = [
       const url = new URL(request.url);
       const campaignId = url.searchParams.get("campaign_id");
       const assetId = url.searchParams.get("asset_id");
-      advance();
+      state.batches.forEach(sync);
       const items = state.batches.filter((b) => {
         if (assetId) return b.asset?.id === assetId || state.targetAsset.get(b.id) === assetId;
         if (campaignId) return b.campaign_id === campaignId;
@@ -305,12 +397,11 @@ export const handlers: HttpHandler[] = [
       const cost = price(ratio, quality, count);
       const bErr = budgetError(cost, body.budget_override ?? false, user.roles);
       if (bErr) return bErr;
-      const campaign = CAMPAIGNS.find((c) => c.id === body.campaign_id);
       const b = newBatch(
         {
           operation: "generate",
           campaign_id: body.campaign_id ?? null,
-          brand_id: campaign?.brand_id ?? body.brand_id ?? MOCK_BRAND_ID,
+          brand_id: body.brand_id ?? MOCK_BRAND_ID,
           prompt,
           preset: body.preset!,
           aspect_ratio: ratio,
@@ -396,100 +487,32 @@ export const handlers: HttpHandler[] = [
     }),
   ),
 
+  // Endpoint owned by the content module (SPEC-04 §2.4); the content mocks do not implement it, so the
+  // Studio's mock answers it. The job is in the shared store (GET /jobs/{id} → result.prompts).
   rest.post(
     api("/images/prompt-suggestions"),
     withAuth("generate.run", async ({ request, user }) => {
       const keyErr = requireKey(request);
       if (keyErr) return keyErr;
-      const body = (await request.json()) as { preset?: string };
+      const body = (await request.json()) as { preset?: string; campaign_id?: string | null };
       const kind = body.preset === "poster" ? "Poster" : body.preset === "thumbnail" ? "Thumbnail" : "Ảnh";
-      const id = uuid();
-      state.suggestionJobs.set(id, {
+      const prompts = [
+        `${kind} khai giảng khóa IELTS: học viên 18–22 tuổi cười tươi trong lớp học sáng sủa, tông xanh dương #0055FF của brand, khoảng trống phía trên cho tiêu đề`,
+        `${kind} tối giản nền trắng, logo Anh ngữ Sao Mai góc trên, sách và tai nghe trên bàn gỗ, điểm nhấn xanh dương #0055FF, phong cách thân thiện, đáng tin cậy`,
+        `${kind} ngoài trời: nhóm bạn trẻ luyện nói tiếng Anh ở quán cà phê, ánh sáng tự nhiên, trang phục có chi tiết xanh dương #0055FF, cảm giác gần gũi`,
+      ];
+      const job = createMockJob({
+        type: "image_prompt_suggest",
         createdBy: user.id,
-        prompts: [
-          `${kind} khai giảng khóa IELTS: học viên 18–22 tuổi cười tươi trong lớp học sáng sủa, tông xanh dương #0055FF của brand, khoảng trống phía trên cho tiêu đề`,
-          `${kind} tối giản nền trắng, logo Anh ngữ Sao Mai góc trên, sách và tai nghe trên bàn gỗ, điểm nhấn xanh dương #0055FF, phong cách thân thiện, đáng tin cậy`,
-          `${kind} ngoài trời: nhóm bạn trẻ luyện nói tiếng Anh ở quán cà phê, ánh sáng tự nhiên, trang phục có chi tiết xanh dương #0055FF, cảm giác gần gũi`,
-        ],
+        idempotencyKey: request.headers.get("Idempotency-Key"),
+        campaignId: body.campaign_id ?? null,
+        modelCode: "fake-text",
+        estimate: 0.01,
+        steps: [["suggest", "content_image_prompt_suggest"]],
+        simulate: { stepMs: 0 },
+        onSucceeded: () => ({ prompts }),
       });
-      return accepted({ job_id: id, status: "queued", estimated_cost: { amount: 0.01, currency: "USD", is_estimate: true } });
+      return accepted({ job_id: job.id, status: "queued", estimated_cost: { amount: 0.01, currency: "USD", is_estimate: true } });
     }),
   ),
-
-  // Fallback for prompt-suggestion jobs only; other job ids fall through to the job module.
-  rest.get(api("/jobs/:id"), ({ params }) => {
-    const job = state.suggestionJobs.get(String(params.id));
-    if (!job) return undefined;
-    const user = mockSession.get();
-    if (!user) return fail(401, "UNAUTHENTICATED", "Chưa đăng nhập");
-    if (user.id !== job.createdBy && !user.permissions.includes("provider.view")) return fail(404, "NOT_FOUND", "Không tìm thấy");
-    const dto: JobDto = { id: String(params.id), status: "succeeded", result: { prompts: job.prompts }, error: null };
-    return ok({ ...dto, job_type: "image_prompt_suggest", progress: 100, steps: [] });
-  }),
-
-  // Fallback for jobs of this store; other job ids fall through to the job module.
-  rest.post(api("/jobs/:id/retry"), ({ params }) => {
-    const b = state.batches.find((x) => x.job.id === params.id);
-    if (!b) return undefined;
-    const user = mockSession.get();
-    if (!user) return fail(401, "UNAUTHENTICATED", "Chưa đăng nhập");
-    if (b.created_by !== user.id && !user.roles.includes("admin")) return fail(404, "NOT_FOUND", "Không tìm thấy");
-    if (b.job.status !== "failed") return fail(409, "INVALID_STATE_TRANSITION", "Chỉ thử lại job lỗi");
-    b.job = { ...b.job, status: "queued", progress: 0, error_code: null, error_kind: null, error_message: null };
-    return accepted({ job_id: b.job.id, status: "queued" });
-  }),
-
-  // Fallback for image assets of this store; other assets fall through to the asset/review modules.
-  rest.post(api("/assets/:id/submit-review"), async ({ request, params }) => {
-    const owned = state.batches.filter((b) => b.asset?.id === params.id);
-    if (owned.length === 0) return undefined;
-    const user = mockSession.get();
-    if (!user) return fail(401, "UNAUTHENTICATED", "Chưa đăng nhập");
-    if (owned[0]!.created_by !== user.id && !isLead(user.roles)) return fail(404, "NOT_FOUND", "Không tìm thấy");
-    const body = (await request.json().catch(() => ({}))) as { checklist?: { typography_checked?: boolean } };
-    const current = owned.find((b) => b.asset!.version_no === b.asset!.current_version_no)!;
-    if (current.asset!.status !== "draft" && current.asset!.status !== "changes_requested") {
-      return fail(409, "INVALID_STATE_TRANSITION", "Không thể gửi duyệt ở trạng thái hiện tại");
-    }
-    if (current.asset!.requires_typography_check && body.checklist?.typography_checked !== true) {
-      return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [{ field: "checklist.typography_checked", issue: "required" }]);
-    }
-    for (const b of owned) b.asset!.status = "pending_review";
-    return ok({ id: params.id, status: "pending_review" });
-  }),
-
-  // Presigned upload fallback (owned by the file module on the backend; no FE module mocks it yet).
-  rest.post(
-    api("/files/upload-url"),
-    withAuth(null, async ({ request }) => {
-      const body = (await request.json()) as { filename?: string; mime_type?: string; size_bytes?: number };
-      if (!body.mime_type || !["image/png", "image/jpeg", "image/webp", "image/svg+xml", "application/pdf", "video/mp4", "audio/mpeg"].includes(body.mime_type)) {
-        return fail(415, "UNSUPPORTED_MEDIA_TYPE", "Định dạng không được hỗ trợ");
-      }
-      if ((body.size_bytes ?? 0) > 20 * 1024 * 1024) return fail(413, "FILE_TOO_LARGE", "Tệp quá lớn");
-      const id = uuid();
-      state.files.set(id, { mime: body.mime_type, name: body.filename ?? "upload" });
-      const ticket: UploadTicketDto = {
-        file_id: id,
-        url: new URL(`/mock-storage/${id}`, window.location.origin).toString(),
-        method: "PUT",
-        headers: { "Content-Type": body.mime_type },
-        expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
-      };
-      return ok(ticket, { status: 201 });
-    }),
-  ),
-  rest.put("*/mock-storage/:id", () => new Response(null, { status: 200 })),
-  rest.post(
-    api("/files/:id/complete"),
-    withAuth<{ id: string }>(null, ({ params }) => {
-      const f = state.files.get(params.id);
-      if (!f) return undefined;
-      return ok({ id: params.id, mime_type: f.mime, original_name: f.name, upload_status: "ready", kind: "image" });
-    }),
-  ),
-
-  // Target pickers fallback (campaign/brand modules register theirs earlier).
-  rest.get(api("/campaigns"), withAuth("brand.view", () => page(CAMPAIGNS, null))),
-  rest.get(api("/brands"), withAuth("brand.view", () => page(BRANDS, null))),
 ];

@@ -109,6 +109,9 @@ func Bundle(dir string) ([]byte, error) {
 	if err := checkRefs(root, buf.String()); err != nil {
 		return nil, err
 	}
+	if err := checkTags(root); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
 }
 
@@ -128,4 +131,48 @@ func checkRefs(root *yaml.Node, text string) error {
 		return fmt.Errorf("undefined $refs: %s", strings.Join(slices.Compact(missing), ", "))
 	}
 	return nil
+}
+
+// checkTags fails when an operation uses a tag that _base.yaml does not
+// declare under the top-level `tags:` list.
+func checkTags(root *yaml.Node) error {
+	declared := map[string]bool{}
+	if tags := mapping(root, "tags"); tags != nil {
+		for _, t := range tags.Content {
+			if n := mapping(t, "name"); n != nil {
+				declared[n.Value] = true
+			}
+		}
+	}
+	var missing []string
+	paths := mapping(root, "paths")
+	if paths == nil {
+		return nil
+	}
+	for i := 1; i < len(paths.Content); i += 2 {
+		item := paths.Content[i]
+		for j := 1; j < len(item.Content); j += 2 {
+			for _, t := range seq(mapping(item.Content[j], "tags")) {
+				if !declared[t] {
+					missing = append(missing, t)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return fmt.Errorf("undeclared tags (add them to _base.yaml): %s", strings.Join(slices.Compact(missing), ", "))
+	}
+	return nil
+}
+
+func seq(n *yaml.Node) []string {
+	if n == nil || n.Kind != yaml.SequenceNode {
+		return nil
+	}
+	out := make([]string, 0, len(n.Content))
+	for _, c := range n.Content {
+		out = append(out, c.Value)
+	}
+	return out
 }

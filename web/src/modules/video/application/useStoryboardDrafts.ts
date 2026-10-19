@@ -30,15 +30,20 @@ export interface StoryboardDrafts {
 /** Local, editable copy of the storyboard; re-syncs from the server when it is not dirty. */
 export function useStoryboardDrafts(project: VideoProject): StoryboardDrafts {
   const [drafts, setDrafts] = useState<SceneDraft[]>(() => toDrafts(project.scenes));
-  const dirtyRef = useRef(false);
   const mutation = useSaveScenes(project.id);
+  // Server scenes the drafts were last synced with. "Editing" means the drafts differ from *these*,
+  // not from the incoming scenes (otherwise the first storyboard would never be adopted).
+  const syncedRef = useRef(project.scenes);
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
 
   const dirty = useMemo(() => isDirty(drafts, project.scenes), [drafts, project.scenes]);
-  dirtyRef.current = dirty;
 
   // Server changed (storyboard job finished, scenes regenerated…): adopt it unless the user is editing.
   useEffect(() => {
-    if (!dirtyRef.current) setDrafts(toDrafts(project.scenes));
+    const editing = isDirty(draftsRef.current, syncedRef.current);
+    syncedRef.current = project.scenes;
+    if (!editing) setDrafts(toDrafts(project.scenes));
   }, [project.scenes]);
 
   const issues = useMemo(() => validateStoryboard(drafts, project.limits), [drafts, project.limits]);

@@ -21,7 +21,10 @@ type API struct {
 	Reserved    map[kernel.ID]kernel.Money
 	Spent       kernel.Money
 	Usage       []usecase.UsageInput
-	usageCost   map[kernel.ID]kernel.Money
+	// Overrides records jobs whose reservation needed an override (the real
+	// service audits these as budget.override): job ID → kind.
+	Overrides map[kernel.ID]string
+	usageCost map[kernel.ID]kernel.Money
 }
 
 // NewAPI returns a fake with the fake-provider seed prices.
@@ -88,6 +91,12 @@ func (a *API) Reserve(_ context.Context, req usecase.ReserveRequest) (usecase.Re
 	}
 	if req.Amount.GreaterThan(limit) && (req.Override == nil || !req.Override.IsLeadOrAdmin()) {
 		return usecase.Reservation{}, kernel.ErrJobBudgetExceeded
+	}
+	if req.Amount.GreaterThan(limit) {
+		if a.Overrides == nil {
+			a.Overrides = map[kernel.ID]string{}
+		}
+		a.Overrides[req.JobID] = "per_job"
 	}
 	if a.Spent.Add(a.reservedTotal()).Add(req.Amount).GreaterThan(a.GlobalLimit) && (req.Override == nil || !req.Override.IsAdmin()) {
 		return usecase.Reservation{}, kernel.ErrBudgetExceeded

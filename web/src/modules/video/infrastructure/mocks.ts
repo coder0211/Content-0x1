@@ -1,10 +1,9 @@
 import type { HttpHandler } from "msw";
 import { accepted, api, fail, ok, page, rest, withAuth } from "@/shared/api/mock";
+import { mockAssets } from "@/shared/api/mock-assets";
 import { uuid } from "@/shared/lib/id";
 import { DEFAULT_LIMITS, PRESETS, validateStoryboard, type SceneDraft } from "../domain/video";
 import type {
-  BrandAssetDto,
-  BrandDto,
   CreateVideoDto,
   EstimateDto,
   JobStepDto,
@@ -36,11 +35,10 @@ interface MockProject {
   job: MockJob | null;
 }
 
-const MOCK_BRAND: BrandDto = { id: "b0000000-0000-4000-8000-000000000001", name: "Anh ngữ Sao Mai" };
-const MOCK_TRACKS: BrandAssetDto[] = [
-  { id: "ba000000-0000-4000-8000-000000000001", asset_type: "music", label: "Nhạc nền tươi sáng (có license)", license: { type: "royalty_free", source: "Thư viện nội bộ" } },
-  { id: "ba000000-0000-4000-8000-000000000002", asset_type: "music", label: "Bản demo chưa có license", license: null },
-];
+/** Seed brand of the brand mocks (brands and music tracks are served there). */
+const DEFAULT_BRAND_ID = "10000000-0000-4000-8000-000000000001";
+/** Seed music track without licence in the brand mocks (BrandAPI.RequireLicensedMusic → MUSIC_NOT_LICENSED). */
+const UNLICENSED_TRACK_IDS = new Set(["ba000000-0000-4000-8000-000000000002"]);
 
 let projects = new Map<string, MockProject>();
 let idem = new Map<string, unknown>();
@@ -53,10 +51,24 @@ export function resetVideoMocks(): void {
 /** Test helper: seed a project directly. */
 export function seedVideoProject(dto: VideoProjectDto, job: MockJob | null = null): void {
   projects.set(dto.id, { dto, job });
+  if (!mockAssets.find(dto.id)) {
+    const a = mockAssets.create({
+      id: dto.id,
+      type: "video",
+      subtype: dto.settings.preset,
+      title: dto.title,
+      campaignId: dto.campaign_id,
+      brandId: dto.brand_id,
+      createdBy: dto.created_by,
+      content: { prompt: dto.prompt, preset: dto.settings.preset, aspect_ratio: dto.settings.aspect_ratio },
+    });
+    a.summary.status = dto.status;
+  }
 }
 
 export function getMockVideo(id: string): VideoProjectDto | undefined {
-  return projects.get(id)?.dto;
+  const p = projects.get(id);
+  return p ? snapshot(p) : undefined;
 }
 
 const now = () => new Date().toISOString();
@@ -133,7 +145,21 @@ function finishRender(p: MockProject) {
     subtitle_url: null,
   };
   d.stage = "ready";
-  if (d.status === "approved") d.status = "draft";
+  const asset = mockAssets.find(d.id);
+  if (asset) {
+    const thumb = `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${d.settings.width / 4}" height="${d.settings.height / 4}"><rect width="100%" height="100%" fill="#E2E8F0"/></svg>`)}`;
+    mockAssets.addVersion(asset, {
+      content: { prompt: d.prompt, preset: d.settings.preset, aspect_ratio: d.settings.aspect_ratio, script: d.script, scene_ids: d.scenes.map((x) => x.id), final_file_id: d.output.file_id, subtitle_file_id: d.output.subtitle_file_id },
+      files: [
+        { file_id: d.output.file_id, role: "primary", sort_order: 0, mime_type: "video/mp4", kind: "video", width: d.settings.width, height: d.settings.height, duration_ms: d.output.duration_ms, url: "/mock/video.mp4" },
+        { file_id: uuid(), role: "thumbnail", sort_order: 1, mime_type: "image/svg+xml", kind: "image", width: d.settings.width / 4, height: d.settings.height / 4, duration_ms: null, url: thumb },
+      ],
+      jobId: job.dto.id,
+      jobType: job.dto.job_type,
+      changeNote: "Render video",
+      createdBy: d.created_by,
+    });
+  } else if (d.status === "approved") d.status = "draft";
 }
 
 function markSceneReady(s: SceneDto) {
@@ -199,7 +225,7 @@ function advance(p: MockProject): void {
         setSteps(job, (k) => k === "voiceover_generation" || k === "subtitle_generation", "succeeded");
         if (d.scenes.some((s) => s.status === "failed")) {
           job.dto.status = "failed";
-          job.dto.error_code = "SCENE_FAILED";
+          job.dto.error_code = "STEP_FAILED";
           job.dto.error_message = "Có cảnh sinh lỗi. Tạo lại riêng cảnh lỗi rồi render.";
           job.dto.progress = 60;
           d.stage = "failed";
@@ -242,6 +268,8 @@ function advance(p: MockProject): void {
 
 function snapshot(p: MockProject): VideoProjectDto {
   const d = p.dto;
+  const asset = mockAssets.find(d.id);
+  if (asset) d.status = asset.summary.status;
   d.total_duration_ms = total(d.scenes);
   d.current_job = p.job ? structuredClone(p.job.dto) : null;
   return structuredClone(d);
@@ -337,8 +365,7 @@ export const handlers: HttpHandler[] = [
       if (body.music.enabled && !body.music.track_brand_asset_id) details.push({ field: "music.track_brand_asset_id", issue: "required" });
       if (details.length) return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", details);
       if (body.music.enabled) {
-        const track = MOCK_TRACKS.find((t) => t.id === body.music.track_brand_asset_id);
-        if (!track?.license) {
+        if (UNLICENSED_TRACK_IDS.has(body.music.track_brand_asset_id ?? "")) {
           return fail(422, "MUSIC_NOT_LICENSED", "Nhạc nền chưa có license hợp lệ", [{ field: "music.track_brand_asset_id", issue: "not_licensed" }]);
         }
       }
@@ -351,7 +378,7 @@ export const handlers: HttpHandler[] = [
           status: "draft",
           stage: "storyboarding",
           campaign_id: body.campaign_id,
-          brand_id: body.brand_id ?? MOCK_BRAND.id,
+          brand_id: body.brand_id ?? DEFAULT_BRAND_ID,
           created_by: user.id,
           prompt: body.prompt,
           script: null,
@@ -380,6 +407,21 @@ export const handlers: HttpHandler[] = [
         job: newJob("video_storyboard", [step("script_generation"), step("storyboard_generation")]),
       };
       projects.set(id, p);
+      // The backend creates the content_assets row (type video) with the project; the library mocks
+      // serve it (submit-review, review queue, download) from the shared asset store.
+      mockAssets.create({
+        id,
+        type: "video",
+        subtype: body.preset,
+        title: p.dto.title,
+        campaignId: body.campaign_id,
+        brandId: p.dto.brand_id,
+        createdBy: user.id,
+        content: { prompt: body.prompt, preset: body.preset, aspect_ratio: preset.aspectRatio, script: null, scene_ids: [] },
+        jobId: p.job!.dto.id,
+        jobType: "video_storyboard",
+        changeNote: "Tạo dự án video",
+      });
       const res = { asset_id: id, job_id: p.job!.dto.id, status: "queued", estimated_cost: { amount: 0.004, currency: "USD", is_estimate: true } };
       return accepted(remember(key, user.id, res));
     }),
@@ -535,28 +577,4 @@ export const handlers: HttpHandler[] = [
     }),
   ),
 
-  // Asset module owns this endpoint; answer only for video ids simulated here, otherwise fall through.
-  rest.post(api("/assets/:id/submit-review"), (info) => {
-    const p = projects.get(String(info.params.id));
-    if (!p) return undefined;
-    return withAuth<IdParams>(null, ({ user }) => {
-      if (!canEdit(p, user)) return fail(404, "NOT_FOUND", "Không tìm thấy asset");
-      if (p.dto.status !== "draft" && p.dto.status !== "changes_requested") {
-        return fail(409, "INVALID_STATE_TRANSITION", "Không thể gửi duyệt ở trạng thái này");
-      }
-      p.dto.status = "pending_review";
-      return ok({ id: p.dto.id, status: p.dto.status });
-    })(info as never);
-  }),
-
-  // Fallbacks so the wizard works in mock mode before the brand module ships its mocks
-  // (the brand module's handlers are registered first and win when present).
-  rest.get(
-    api("/brands"),
-    withAuth("brand.view", () => page([MOCK_BRAND])),
-  ),
-  rest.get(
-    api("/brands/:id/assets"),
-    withAuth<IdParams>("brand.view", ({ params }) => page(params.id === MOCK_BRAND.id ? MOCK_TRACKS : [])),
-  ),
 ];

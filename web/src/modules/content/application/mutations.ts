@@ -39,11 +39,6 @@ export function useTransform(assetId: ID) {
   });
 }
 
-export function useCancelJob() {
-  const repo = useRepository("content");
-  return useMutation({ mutationFn: (jobId: ID) => repo.cancelJob(jobId) });
-}
-
 export function useSaveVersion(assetId: ID) {
   const repo = useRepository("content");
   const qc = useQueryClient();
@@ -60,6 +55,17 @@ export function useRestoreVersion(assetId: ID) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (versionNo: number) => repo.restoreVersion(assetId, versionNo),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: contentKeys.asset(assetId) });
+    },
+  });
+}
+
+export function useSubmitReview(assetId: ID) {
+  const repo = useRepository("content");
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => repo.submitReview(assetId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: contentKeys.asset(assetId) });
     },

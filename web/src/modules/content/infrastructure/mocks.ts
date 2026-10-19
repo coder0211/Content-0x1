@@ -1,47 +1,18 @@
 /**
- * MSW handlers for Content Studio (SPEC-04 §2.4) plus the job/asset endpoints
- * for jobs and assets created here. Requests for jobs/assets this module does
- * not know fall through (resolver returns undefined) to the job/library mocks,
- * so module state stays independent. GET /brands, /brands/:id/products and
- * the demo campaign are fallbacks used only when the brand/campaign mocks do
- * not answer first (they are registered earlier in app/mocks/handlers.ts).
+ * MSW handlers for Content Studio (SPEC-04 §2.4). Jobs live in the shared job store
+ * (`@/shared/api/mock-jobs`, served by the job module's mocks) and generated variants are
+ * published to the shared asset store (`@/shared/api/mock-assets`, served by the library
+ * module's `/assets*` mocks), so the rest of the app (jobs, library, review) sees them.
+ * Brands, products and campaigns come from the brand/campaign mocks.
  */
 import type { HttpHandler } from "msw";
-import {
-  accepted,
-  api,
-  fail,
-  ok,
-  page,
-  rest,
-  withAuth,
-} from "@/shared/api/mock";
-import { uuid } from "@/shared/lib/id";
-import type {
-  AssetDto,
-  ContentJsonDto,
-  GenerateRequestDto,
-  JobDto,
-  VersionDto,
-} from "./dto";
+import { accepted, api, fail, rest, withAuth } from "@/shared/api/mock";
+import { mockAssets } from "@/shared/api/mock-assets";
+import { createMockJob, type MockJobDto } from "@/shared/api/mock-jobs";
+import type { ContentJsonDto, GenerateRequestDto } from "./dto";
 
-export const MOCK_BRANDS = [
-  { id: "c0000000-0000-4000-8000-0000000000b1", name: "Anh ngữ Sao Mai" },
-  { id: "c0000000-0000-4000-8000-0000000000b2", name: "Sao Mai Kids" },
-];
-export const MOCK_PRODUCTS = [
-  {
-    id: "c0000000-0000-4000-8000-0000000000p1",
-    name: "Khóa giao tiếp 12 tuần",
-  },
-];
-export const MOCK_CAMPAIGN = {
-  id: "c0000000-0000-4000-8000-0000000000c1",
-  name: "Khóa giao tiếp T11",
-  brand_id: MOCK_BRANDS[0]!.id,
-  goal: "lead",
-  status: "in_progress",
-};
+/** Seed brand of the brand/campaign mocks (used when a request only names a campaign). */
+const DEFAULT_BRAND_ID = "10000000-0000-4000-8000-000000000001";
 
 const PLATFORMS = ["facebook", "instagram", "tiktok", "zalo", "email"];
 const FORMATS = [
@@ -58,45 +29,19 @@ const DEFAULT_FORMAT: Record<string, string> = {
   tiktok: "tiktok_script",
   email: "email",
 };
-/** Job polls before a mock job succeeds (queued → running → running → succeeded). */
-const DEFAULT_POLLS = 3;
-let pollsToFinish = DEFAULT_POLLS;
+/** Wall-clock duration of each simulated job step (dev); 0 = finish on the next read (tests). */
+const DEFAULT_STEP_MS = 600;
+let stepMs = DEFAULT_STEP_MS;
 
-/** Tests: make jobs finish on the first poll. */
+/** Tests: `n ≤ 1` makes jobs finish on the first read of GET /jobs/{id}. */
 export function setContentMockPolls(n: number): void {
-  pollsToFinish = n;
+  stepMs = n <= 1 ? 0 : DEFAULT_STEP_MS;
 }
-
-interface MockAsset {
-  asset: AssetDto;
-  ownerId: string;
-  versions: VersionDto[];
-}
-
-interface MockJob {
-  dto: JobDto;
-  ownerId: string;
-  polls: number;
-  complete: () => string[];
-}
-
-const assets = new Map<string, MockAsset>();
-const jobs = new Map<string, MockJob>();
-const idem = new Map<string, string>();
 
 export function resetContentMocks(): void {
-  assets.clear();
-  jobs.clear();
-  idem.clear();
-  pollsToFinish = DEFAULT_POLLS;
+  stepMs = DEFAULT_STEP_MS;
 }
 
-/** Test helper: the stored asset. */
-export function getMockContentAsset(id: string): MockAsset | undefined {
-  return assets.get(id);
-}
-
-const now = () => new Date().toISOString();
 
 function html(text: string): string {
   return text
@@ -119,112 +64,34 @@ function provenance(jobId: string) {
   };
 }
 
-function addAsset(
-  ownerId: string,
-  input: {
-    title: string;
-    subtype: string;
-    campaignId: string | null;
-    brandId: string | null;
-    sourceId?: string | null;
-  },
-  content: ContentJsonDto,
-  jobId: string | null,
-  note: string,
-): string {
-  const id = uuid();
-  const v: VersionDto = {
-    version_no: 1,
-    change_note: note,
-    created_at: now(),
-    generated_by_job_id: jobId,
-    content_json: content,
-  };
-  assets.set(id, {
-    ownerId,
-    versions: [v],
-    asset: {
-      id,
-      asset_type: "content",
-      subtype: input.subtype,
-      title: input.title,
-      status: "draft",
-      campaign_id: input.campaignId,
-      brand_id: input.brandId,
-      source_asset_id: input.sourceId ?? null,
-      current_version: v,
-    },
-  });
-  return id;
-}
-
-function addVersion(
-  a: MockAsset,
-  content: ContentJsonDto,
-  note: string,
-  jobId: string | null,
-): VersionDto {
-  const v: VersionDto = {
-    version_no: a.versions.length + 1,
-    change_note: note,
-    created_at: now(),
-    generated_by_job_id: jobId,
-    content_json: content,
-  };
-  a.versions.push(v);
-  a.asset.current_version = v;
-  if (a.asset.status === "approved") a.asset.status = "draft";
-  return v;
-}
-
-function createJob(
+function startJob(
   ownerId: string,
   type: string,
-  key: string | null,
-  complete: () => string[],
-) {
-  if (key) {
-    const existing = idem.get(`${ownerId}/${key}`);
-    if (existing) return jobs.get(existing)!.dto;
-  }
-  const id = uuid();
-  const dto: JobDto = {
-    id,
-    job_type: type,
-    status: "queued",
-    progress: 0,
-    result: null,
-    error: null,
-    cost: { estimate: 0.02, actual: null },
-  };
-  jobs.set(id, { dto, ownerId, polls: 0, complete });
-  if (key) idem.set(`${ownerId}/${key}`, id);
+  key: string,
+  steps: Array<[string, string]>,
+  complete: (jobId: string) => string[],
+  extra: { campaignId?: string | null; assetId?: string | null } = {},
+): MockJobDto {
+  const dto: MockJobDto = createMockJob({
+    type,
+    createdBy: ownerId,
+    idempotencyKey: key,
+    providerCode: "fake",
+    modelCode: "fake-text",
+    estimate: 0.02,
+    steps,
+    campaignId: extra.campaignId ?? null,
+    assetId: extra.assetId ?? null,
+    simulate: { stepMs },
+    onSucceeded: () => ({ asset_ids: complete(dto.id) }),
+  });
   return dto;
 }
 
-function advance(j: MockJob): void {
-  if (
-    j.dto.status === "succeeded" ||
-    j.dto.status === "failed" ||
-    j.dto.status === "cancelled"
-  )
-    return;
-  j.polls += 1;
-  if (j.polls >= pollsToFinish) {
-    j.dto.status = "succeeded";
-    j.dto.progress = 100;
-    j.dto.result = { asset_ids: j.complete() };
-    j.dto.cost = { estimate: 0.02, actual: 0.01 };
-  } else {
-    j.dto.status = "running";
-    j.dto.progress = Math.round((j.polls / pollsToFinish) * 100);
-  }
-}
-
-function acceptedJob(dto: JobDto) {
+function acceptedJob(dto: MockJobDto) {
   return accepted({
     job_id: dto.id,
-    status: dto.status,
+    status: "queued",
     estimated_cost: { amount: 0.02, currency: "USD", is_estimate: true },
   });
 }
@@ -282,42 +149,57 @@ function rewriteBody(
 }
 
 const IDEM_HEADER = "Idempotency-Key";
+const isLead = (roles: readonly string[]) => roles.includes("admin") || roles.includes("marketing_lead");
+
+function publish(
+  ownerId: string,
+  input: { title: string; subtype: string; campaignId: string | null; brandId: string; sourceId?: string | null },
+  content: ContentJsonDto,
+  jobId: string,
+  jobType: string,
+  note: string,
+): string {
+  return mockAssets.create({
+    type: "content",
+    subtype: input.subtype,
+    title: input.title,
+    campaignId: input.campaignId,
+    brandId: input.brandId,
+    createdBy: ownerId,
+    sourceAssetId: input.sourceId ?? null,
+    content: content as Record<string, unknown>,
+    jobId,
+    jobType,
+    changeNote: note,
+  }).summary.id;
+}
 
 export const handlers: HttpHandler[] = [
   rest.post(
     api("/content/generations"),
     withAuth("generate.run", async ({ request, user }) => {
       const key = request.headers.get(IDEM_HEADER);
-      if (!key)
-        return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
+      if (!key) return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
       const req = (await request.json()) as GenerateRequestDto;
       const details = [];
-      if (!PLATFORMS.includes(req.platform))
-        details.push({ field: "platform", issue: "invalid" });
-      if (!(req.variants >= 1 && req.variants <= 5))
-        details.push({ field: "variants", issue: "out_of_range" });
-      if (!req.brand_id && !req.campaign_id)
-        details.push({ field: "brand_id", issue: "required" });
-      if (details.length)
-        return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", details);
+      if (!PLATFORMS.includes(req.platform)) details.push({ field: "platform", issue: "invalid" });
+      if (!(req.variants >= 1 && req.variants <= 5)) details.push({ field: "variants", issue: "out_of_range" });
+      if (!req.brand_id && !req.campaign_id) details.push({ field: "brand_id", issue: "required" });
+      if (details.length) return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", details);
       const format = DEFAULT_FORMAT[req.platform] ?? "facebook_post";
-      const brandId = req.brand_id ?? MOCK_CAMPAIGN.brand_id;
-      const dto = createJob(user.id, "content_generation", key, () =>
-        Array.from({ length: req.variants }, (_, i) => {
-          const c = variantContent(req, i, format, dto.id);
-          return addAsset(
-            user.id,
-            {
-              title: c.title!,
-              subtype: format,
-              campaignId: req.campaign_id,
-              brandId,
-            },
-            c,
-            dto.id,
-            "Tạo bởi AI",
-          );
-        }),
+      const brandId = req.brand_id ?? DEFAULT_BRAND_ID;
+      const steps = Array.from({ length: req.variants }, (_, i): [string, string] => [`variant:${i + 1}`, "text_generation"]);
+      const dto = startJob(
+        user.id,
+        "content_generation",
+        key,
+        [...steps, ["checks", "content_checks"]],
+        (jobId) =>
+          Array.from({ length: req.variants }, (_, i) => {
+            const c = variantContent(req, i, format, jobId);
+            return publish(user.id, { title: c.title!, subtype: format, campaignId: req.campaign_id, brandId }, c, jobId, "content_generation", "Tạo bởi AI");
+          }),
+        { campaignId: req.campaign_id },
       );
       return acceptedJob(dto);
     }),
@@ -325,253 +207,93 @@ export const handlers: HttpHandler[] = [
 
   rest.post(
     api("/content/:assetId/rewrites"),
-    withAuth<{ assetId: string }>(
-      "generate.run",
-      async ({ request, params, user }) => {
-        const key = request.headers.get(IDEM_HEADER);
-        if (!key)
-          return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
-        const a = assets.get(params.assetId);
-        if (!a) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
-        const isLead =
-          user.roles.includes("admin") || user.roles.includes("marketing_lead");
-        if (a.ownerId !== user.id && !isLead)
-          return fail(
-            403,
-            "FORBIDDEN",
-            "Bạn không có quyền thực hiện thao tác này",
-          );
-        const req = (await request.json()) as {
-          instruction: string;
-          tone?: string[];
-          custom_prompt?: string;
-        };
-        if (
-          !["shorten", "expand", "change_tone", "custom"].includes(
-            req.instruction,
-          )
-        ) {
-          return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [
-            { field: "instruction", issue: "invalid" },
-          ]);
-        }
-        if (req.instruction === "custom" && !req.custom_prompt) {
-          return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [
-            { field: "custom_prompt", issue: "required" },
-          ]);
-        }
-        const base = a.asset.current_version!;
-        const dto = createJob(user.id, "content_rewrite", key, () => {
-          const c = { ...(base.content_json ?? {}) };
-          c.body_text = rewriteBody(
-            c.body_text ?? "",
-            req.instruction,
-            req.tone,
-            req.custom_prompt,
-          );
+    withAuth<{ assetId: string }>("generate.run", async ({ request, params, user }) => {
+      const key = request.headers.get(IDEM_HEADER);
+      if (!key) return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
+      const a = mockAssets.find(params.assetId);
+      if (!a || a.summary.type !== "content") return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
+      if (a.summary.created_by !== user.id && !isLead(user.roles)) return fail(403, "FORBIDDEN", "Bạn không có quyền thực hiện thao tác này");
+      const req = (await request.json()) as { instruction: string; tone?: string[]; custom_prompt?: string };
+      if (!["shorten", "expand", "change_tone", "custom"].includes(req.instruction)) {
+        return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [{ field: "instruction", issue: "invalid" }]);
+      }
+      if (req.instruction === "custom" && !req.custom_prompt) {
+        return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [{ field: "custom_prompt", issue: "required" }]);
+      }
+      const base = mockAssets.current(a);
+      const dto = startJob(
+        user.id,
+        "content_rewrite",
+        key,
+        [["rewrite", "text_generation"]],
+        (jobId) => {
+          const c = { ...(base.content_json as ContentJsonDto) };
+          c.body_text = rewriteBody(c.body_text ?? "", req.instruction, req.tone, req.custom_prompt);
           c.body_html = html(c.body_text);
-          c.warnings = (c.warnings ?? []).filter((w) =>
-            c.body_text!.toLowerCase().includes(w.text.toLowerCase()),
-          );
-          c.provenance = provenance(dto.id);
-          addVersion(a, c, `Viết lại từ phiên bản ${base.version_no}`, dto.id);
-          return [a.asset.id];
-        });
-        return acceptedJob(dto);
-      },
-    ),
+          c.warnings = (c.warnings ?? []).filter((w) => c.body_text!.toLowerCase().includes(w.text.toLowerCase()));
+          c.provenance = provenance(jobId);
+          mockAssets.addVersion(a, {
+            content: c as Record<string, unknown>,
+            jobId,
+            jobType: "content_rewrite",
+            changeNote: `Viết lại từ phiên bản ${base.version_no}`,
+            createdBy: user.id,
+          });
+          return [a.summary.id];
+        },
+        { campaignId: a.summary.campaign_id, assetId: a.summary.id },
+      );
+      return acceptedJob(dto);
+    }),
   ),
 
   rest.post(
     api("/content/:assetId/transforms"),
-    withAuth<{ assetId: string }>(
-      "generate.run",
-      async ({ request, params, user }) => {
-        const key = request.headers.get(IDEM_HEADER);
-        if (!key)
-          return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
-        const a = assets.get(params.assetId);
-        if (!a) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
-        const req = (await request.json()) as { target_type: string };
-        if (!FORMATS.includes(req.target_type)) {
-          return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [
-            { field: "target_type", issue: "invalid" },
-          ]);
-        }
-        const src = a.asset.current_version!.content_json ?? {};
-        const dto = createJob(user.id, "content_transform", key, () => {
+    withAuth<{ assetId: string }>("generate.run", async ({ request, params, user }) => {
+      const key = request.headers.get(IDEM_HEADER);
+      if (!key) return fail(400, "IDEMPOTENCY_KEY_REQUIRED", "Thiếu Idempotency-Key");
+      const a = mockAssets.find(params.assetId);
+      if (!a || a.summary.type !== "content") return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
+      const req = (await request.json()) as { target_type: string };
+      if (!FORMATS.includes(req.target_type)) {
+        return fail(400, "VALIDATION_FAILED", "Dữ liệu không hợp lệ", [{ field: "target_type", issue: "invalid" }]);
+      }
+      const src = mockAssets.current(a).content_json as ContentJsonDto;
+      const dto = startJob(
+        user.id,
+        "content_transform",
+        key,
+        [["transform", "text_generation"]],
+        (jobId) => {
           const scenes =
             req.target_type === "video_script"
               ? [
-                  {
-                    narration: src.hook ?? "",
-                    visual_hint: "Học viên ngập ngừng trước lớp",
-                    duration_sec: 4,
-                  },
-                  {
-                    narration: "Lớp nhỏ, giáo viên bản ngữ.",
-                    visual_hint: "Lớp học sáng sủa",
-                    duration_sec: 5,
-                  },
-                  {
-                    narration: src.cta ?? "",
-                    visual_hint: "Logo trên nền màu thương hiệu",
-                    duration_sec: 3,
-                  },
+                  { narration: src.hook ?? "", visual_hint: "Học viên ngập ngừng trước lớp", duration_sec: 4 },
+                  { narration: "Lớp nhỏ, giáo viên bản ngữ.", visual_hint: "Lớp học sáng sủa", duration_sec: 5 },
+                  { narration: src.cta ?? "", visual_hint: "Logo trên nền màu thương hiệu", duration_sec: 3 },
                 ]
               : [];
-          const c: ContentJsonDto = {
-            ...src,
-            format: req.target_type,
-            scenes,
-            provenance: provenance(dto.id),
-          };
-          const title = `${a.asset.title} (${req.target_type})`;
+          const c: ContentJsonDto = { ...src, format: req.target_type, scenes, provenance: provenance(jobId) };
           return [
-            addAsset(
+            publish(
               user.id,
               {
-                title,
+                title: `${a.summary.title} (${req.target_type})`,
                 subtype: req.target_type,
-                campaignId: a.asset.campaign_id ?? null,
-                brandId: a.asset.brand_id ?? null,
-                sourceId: a.asset.id,
+                campaignId: a.summary.campaign_id,
+                brandId: a.summary.brand_id,
+                sourceId: a.summary.id,
               },
               c,
-              dto.id,
+              jobId,
+              "content_transform",
               "Chuyển định dạng bởi AI",
             ),
           ];
-        });
-        return acceptedJob(dto);
-      },
-    ),
-  ),
-
-  rest.get(
-    api("/jobs/:id"),
-    withAuth<{ id: string }>(null, ({ params }) => {
-      const j = jobs.get(params.id);
-      if (!j) return undefined;
-      advance(j);
-      return ok({ ...j.dto });
-    }),
-  ),
-
-  rest.post(
-    api("/jobs/:id/cancel"),
-    withAuth<{ id: string }>(null, ({ params }) => {
-      const j = jobs.get(params.id);
-      if (!j) return undefined;
-      if (
-        j.dto.status === "succeeded" ||
-        j.dto.status === "failed" ||
-        j.dto.status === "cancelled"
-      ) {
-        return fail(
-          409,
-          "INVALID_STATE_TRANSITION",
-          "Không thể chuyển sang trạng thái này",
-        );
-      }
-      j.dto.status = "cancelled";
-      return accepted({ job_id: j.dto.id, status: "cancelled" });
-    }),
-  ),
-
-  rest.get(
-    api("/assets/:id"),
-    withAuth<{ id: string }>("brand.view", ({ params }) => {
-      const a = assets.get(params.id);
-      return a ? ok(a.asset) : undefined;
-    }),
-  ),
-
-  rest.get(
-    api("/assets/:id/versions"),
-    withAuth<{ id: string }>("brand.view", ({ params }) => {
-      const a = assets.get(params.id);
-      return a ? page([...a.versions].reverse()) : undefined;
-    }),
-  ),
-
-  rest.post(
-    api("/assets/:id/versions"),
-    withAuth<{ id: string }>(null, async ({ request, params, user }) => {
-      const a = assets.get(params.id);
-      if (!a) return undefined;
-      const isLead =
-        user.roles.includes("admin") || user.roles.includes("marketing_lead");
-      if (a.ownerId !== user.id && !isLead)
-        return fail(
-          403,
-          "FORBIDDEN",
-          "Bạn không có quyền thực hiện thao tác này",
-        );
-      const req = (await request.json()) as {
-        content_json: ContentJsonDto;
-        change_note: string;
-        base_version_no: number;
-      };
-      if (req.base_version_no !== a.versions.length) {
-        return fail(
-          409,
-          "VERSION_CONFLICT",
-          "Dữ liệu đã được người khác cập nhật, vui lòng tải lại",
-        );
-      }
-      return ok(
-        addVersion(
-          a,
-          req.content_json,
-          req.change_note || "Chỉnh sửa thủ công",
-          null,
-        ),
-        { status: 201 },
+        },
+        { campaignId: a.summary.campaign_id, assetId: a.summary.id },
       );
+      return acceptedJob(dto);
     }),
-  ),
-
-  rest.post(
-    api("/assets/:id/versions/:no/restore"),
-    withAuth<{ id: string; no: string }>(null, ({ params }) => {
-      const a = assets.get(params.id);
-      if (!a) return undefined;
-      const v = a.versions.find((x) => x.version_no === Number(params.no));
-      if (!v) return fail(404, "NOT_FOUND", "Không tìm thấy dữ liệu");
-      return ok(
-        addVersion(
-          a,
-          v.content_json ?? {},
-          `Khôi phục phiên bản ${v.version_no}`,
-          null,
-        ),
-        { status: 201 },
-      );
-    }),
-  ),
-
-  // Fallbacks (brand/campaign mocks answer first when they implement these).
-  rest.get(
-    api("/brands"),
-    withAuth("brand.view", () =>
-      page(MOCK_BRANDS.map((b) => ({ ...b, status: "active" }))),
-    ),
-  ),
-  rest.get(
-    api("/brands/:id/products"),
-    withAuth<{ id: string }>("brand.view", ({ params }) =>
-      params.id === MOCK_BRANDS[0]!.id
-        ? page(MOCK_PRODUCTS)
-        : MOCK_BRANDS.some((b) => b.id === params.id)
-          ? page([])
-          : undefined,
-    ),
-  ),
-  rest.get(
-    api("/campaigns/:id"),
-    withAuth<{ id: string }>("brand.view", ({ params }) =>
-      params.id === MOCK_CAMPAIGN.id ? ok(MOCK_CAMPAIGN) : undefined,
-    ),
   ),
 ];

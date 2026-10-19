@@ -4,8 +4,6 @@
 package video
 
 import (
-	"os"
-
 	"github.com/go-chi/chi/v5"
 
 	"github.com/be/acs/api/internal/app/registry"
@@ -38,7 +36,7 @@ func Register(c *registry.Container) (registry.Module, error) {
 		Tx: c.Tx, Repo: postgres.NewRepository(c.DB), Clock: c.Clock, Audit: c.APIs.Audit,
 		Jobs: c.APIs.Jobs, Budget: c.APIs.Budget, Assets: c.APIs.Assets, Brands: c.APIs.Brands, Campaigns: c.APIs.Campaigns,
 		Providers: c.APIs.Providers, Content: c.APIs.Content, Files: c.APIs.Files, AI: c.AI, Renderer: c.Renderer, Prober: c.Prober,
-		Logger: c.Logger, TempDir: c.Config.FFmpeg.TempDir, FontsDir: os.Getenv("VIDEO_FONTS_DIR"),
+		Logger: c.Logger, TempDir: c.Config.FFmpeg.TempDir, FontsDir: c.Config.FFmpeg.FontsDir,
 	}
 	if c.Config.EnableFakeProviders {
 		svc.StubVideoProviders = []string{"fake"}

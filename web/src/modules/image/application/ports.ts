@@ -42,12 +42,6 @@ export interface VariationInput {
   budgetOverride?: boolean;
 }
 
-export interface PromptSuggestionResult {
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
-  prompts: string[];
-  errorKind: string | null;
-}
-
 /** Campaign or brand the user can generate for (the Studio target picker). */
 export interface TargetOption {
   id: ID;
@@ -65,9 +59,7 @@ export interface ImageRepository {
   /** Presigned upload: upload-url → PUT → complete. Returns the ready file id. */
   uploadReference(file: File): Promise<ID>;
   /** POST /images/prompt-suggestions (202) → job id. */
-  requestPromptSuggestions(input: { campaignId?: ID; preset: Preset }, idempotencyKey: string): Promise<ID>;
-  /** GET /jobs/{id} → `result.prompts[]`. */
-  getPromptSuggestions(jobId: ID): Promise<PromptSuggestionResult>;
+  requestPromptSuggestions(input: { campaignId?: ID; brandId?: ID; preset: Preset }, idempotencyKey: string): Promise<ID>;
   /** POST /jobs/{id}/retry (job module; only failed jobs with a retryable error). */
   retryJob(jobId: ID): Promise<void>;
   /** POST /assets/{id}/submit-review with the FR-IMG-06 checklist. */

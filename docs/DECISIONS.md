@@ -133,3 +133,46 @@ Ngày chốt: 18/10/2026. Nguyên tắc: phương án **cân bằng** giữa chi
 - **Ports (additive):** `ports.RenderSpec` gained `ClipDurationsMs`, `VoiceSegments`, `FontsDir`; new `ports.VoiceSegment`. `platform/ffmpeg` builds argument vectors only (no shell), refuses option-like source paths and subtitle/font paths containing filter-graph metacharacters (instead of escaping them); real-ffmpeg tests skip when ffmpeg is missing.
 - **Render image:** `deploy/Dockerfile.render` (ffmpeg + libass + Noto fonts, `VIDEO_FONTS_DIR=/usr/share/fonts/noto`, queues `video,render`) and compose service `render-worker` (profile `app`, 2 CPU / 2 GB, tmpfs work dir); the generic compose `worker` now consumes `text,image,maintenance`. `VIDEO_FONTS_DIR` is read in `video/module.go` via `os.Getenv` (config package is not ours) — orchestrator may move it into `config.FFmpeg`.
 - **FE:** `/videos` = step 1 form (+ `?campaign_id=`, `?script_from_asset_id=`) and recent list; `/videos/:assetId` = studio layout (brief 320 | canvas with tabs Storyboard/Sản xuất | inspector 300). Storyboard uses @dnd-kit plus up/down buttons (keyboard/a11y); "Sản xuất video" is disabled with explicit reasons (limits, unsaved edits, over per-job limit; Lead/Admin tick an override checkbox). Polling every 3 s while a job runs (the job module's SSE hook is not used to avoid a hard dependency). "Gửi duyệt" calls `POST /assets/{id}/submit-review` (asset module, ACS-080); brands/music come from `/brands` and `/brands/{id}/assets` — `video/infrastructure/mocks.ts` answers those only as fallbacks. Mock mode simulates Flow C; a scene whose visual prompt contains `[lỗi]` fails, to demo partial failure + "Tạo lại cảnh".
+## Integration — frontend
+
+- **`Button asChild`** now renders `Slot` with the child alone (no spinner sibling), so `<Button asChild><Link/></Button>` works. The existing `buttonVariants(...)` + `Link` workarounds in campaign/review/dashboard were left as is (equivalent output, no behaviour change).
+- **Shared mock stores** (`web/src/shared/api/mock-jobs.ts`, `mock-assets.ts`): `createMockJob()` (promoted from the job module, now with `onSucceeded`, `idempotencyKey`, `stepMs: 0` = finish on next read) and an asset store in the asset-API shape. The job module's mocks serve `/jobs*` and the library module's mocks serve `/assets*` + `/reviews/queue` over them; content/image/video/campaign mocks only create jobs and publish assets. Removed fallbacks: campaign `/jobs/{id}` + `/assets?campaign_id=`; content `/jobs*`, `/assets*`, `/brands*`, `/campaigns/{id}`; image `/jobs/{id}`, `/jobs/{id}/retry`, `/assets/{id}/submit-review`, `/files/*`, `/brands`, `/campaigns`; video `/assets/{id}/submit-review`, `/brands`, `/brands/{id}/assets`; library `/campaigns`. Seed ids are aligned on the brand/campaign mocks (brand `1000…0001`, campaigns `2000…0001/0002`); the brand mocks seed two music tracks (one unlicensed → `MUSIC_NOT_LICENSED` in Video Studio).
+- **Mock ownership exceptions:** `POST /campaigns/{id}/plan-generations` (content-owned) stays in the campaign mocks because its only effect is the campaign's `content_plan_proposal`; `POST /images/prompt-suggestions` (content-owned) stays in the image mocks. Both now create shared jobs.
+- **Job state:** content (`useContentJob`), campaign (`usePlanJob`) and image prompt suggestions use the job module's `useJob` (SSE → 3 s polling fallback) instead of polling `/jobs/{id}` themselves. Video keeps reading `current_job` from `GET /videos/{id}` (the job is embedded in that resource). Image retry still calls `POST /jobs/{id}/retry` from its repository.
+- **Content Studio** gained "Gửi duyệt" (draft only, disabled while unsaved) and "Mở trong thư viện". Downloading a `content` asset goes through `POST /assets/{id}/download-url` like any asset (the API exports the current version as `.txt`, audited); the library mock mirrors it with a `.txt` URL.
+- **Video storyboard fix:** drafts now adopt the first storyboard when the storyboard job finishes (they were treated as "dirty" against the incoming scenes and stayed empty).
+- **E2E (ACS-105):** `web/e2e/{content,image,video}-flow.spec.ts` + `rbac.spec.ts` run in mock mode. MSW state lives in page memory, so specs sign in once and then navigate only in-app (logout/login switches users without a reload). CI job `web-e2e` installs Chromium and runs `pnpm e2e`.
+## Integration — backend
+
+- **OpenAPI tags:** `_base.yaml` declares every tag used by fragments (brands, campaigns, content, images, videos, jobs, asset, review, budget, settings, dashboard). The bundler now fails on an operation tag that is not declared.
+- **`VIDEO_FONTS_DIR`** moved to `config.FFmpeg.FontsDir`. The default is empty, which means libass/fontconfig system fonts. The render image sets `/usr/share/fonts/noto`.
+- **Budget alert mail:** `app.New` already sets `Platform.Mailer = mail.New(cfg.SMTP)` (Mailpit locally via `SMTP_HOST`). `TestWorkerComposesBudgetAlertMailer` asserts that the worker, and only the worker, gets the `budget-alert-mail` runner.
+- **`job_type` on usage:** content, image and video already pass `JobType`. As a safety net, `InsertUsage` now falls back to `ai_jobs.job_type` when a caller omits it.
+- **Contract fixes found by the fake-vs-real review:**
+  - **Content plan.** The `content_plan` step stored the AI schema (`themes:[{title,…}]`, `schedule`, `deliverables`), which the real `campaign.ParsePlan` rejects, so every plan job failed. The step now maps it to the campaign plan shape:
+    - theme titles become `themes`;
+    - schedule rows become `items` (idea → topic, theme + angle → angle; channel/format are slugified; a non-ISO date moves to notes);
+    - deliverables are summarised in `summary`.
+    The `campaigntest` fake now parses proposals like the real service.
+  - **Override audit.** Video no longer writes a second `budget.override` audit row: `Budget.Reserve` audits the override, and only when it was actually needed. The `budgettest` fake records `Overrides`.
+  - **Variant titles.** Content variant titles are trimmed before `CreateAsset` (a whitespace-only title fell back too late).
+- **Campaign membership (ACS-100):** `GetCampaignForGeneration` now enforces SPEC-01 §2. A creator may generate only in campaigns they created or are a member of; Lead/Admin may generate anywhere. Others get `403`. Before this, any creator could generate content, plans, images or videos in, and spend the budget of, another creator's campaign.
+- **Content download (Flow A, FE `.txt` export):** `POST /assets/{id}/download-url` on a content asset that has no file exports the current version (title, hook, body, CTA, hashtags) as `text/plain` via `Files.Store` (source `generated`) and signs it as `<title>.txt`. The download is audited. The export is not attached to the version (versions stay immutable), so each download creates one small file. `asset.Service.Files` uses `Store` through an optional interface, so fakes without `Store` keep compiling.
+- **Settings API (FE integration):**
+  - `GET /settings/models?provider_id=` filters by provider.
+  - `POST /settings/models/{id}/pricing` accepts `effective_from` as RFC3339 or date-only `YYYY-MM-DD`. A date-only value means 00:00 Vietnam time (UTC+7). Any start earlier **today** is treated as *now*, because prices never apply retroactively to recorded usage. Earlier days are still `400 in_past`.
+- **Prompt-template permission:** reads require `provider.view`. Create, activate and retire stay **Admin or Marketing Lead**. SPEC-01 FR-CNT-08 ("quản lý bởi Admin/Lead") wins over the SPEC-04 table (`provider.manage` = Admin only). The OpenAPI summaries cite FR-CNT-08. Change `canManageTemplates` if the PO decides otherwise.
+- **Security hardening (ACS-101, details in `docs/security/security-review.md`):**
+  - uploads: verified bytes are re-stored under a final key; image dimension cap 8192 px / 40 MP; ffprobe timeout 60 s;
+  - SVG/HTML/XML are signed as attachments;
+  - `secret_ref` is limited to `…_API_KEY|_CREDENTIALS|_TOKEN` (never platform config), checked in both `config.Secret` and validation;
+  - vendor HTTP redirect policy;
+  - `-nostdin -protocol_whitelist file` on every ffmpeg/ffprobe input;
+  - SRT/ASS escaping of markup, control and bidi characters, and hard-splitting of long words;
+  - download extensions follow the verified MIME type;
+  - client `body_html` is regenerated from `body_text`.
+- **Tests without Docker (`internal/e2e`):**
+  - The RBAC matrix runs over the real router: `chi.Walk` over `app.Modules` composed with an unreachable lazy pool, so a new route without an RBAC expectation fails.
+  - A CSRF check runs on every unsafe route.
+  - `TestIDOR` (35 cross-user cases) and `TestFlowA` (brand → campaign → plan job → approve plan → 2 variants on the fake provider → revision → submit → approve → `.txt` download, audited) run over real use cases and handlers with `<m>test` in-memory repositories, the real job engine (`DispatchOnce` + `Execute`) and the real provider registry with the `fake` provider.
+- **Web follow-up for the orchestrator:** `api/openapi.yaml` changed (tags, `provider_id`, `effective_from` description), so run `make gen-web` to refresh `web/src/shared/api/schema.d.ts`. This agent does not touch `web/`.

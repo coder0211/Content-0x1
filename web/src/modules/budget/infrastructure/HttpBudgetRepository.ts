@@ -32,6 +32,11 @@ export class HttpBudgetRepository implements BudgetRepository {
     return toSettings(await http.patch<BudgetSettingsDto>("/settings/budgets", toSettingsPatchDto(patch)));
   }
 
+  async getCampaignBudget(campaignId: string) {
+    const dto = await http.get<BudgetDto | null>(`/campaigns/${encodeURIComponent(campaignId)}/budget`);
+    return dto ? toBudget(dto) : null;
+  }
+
   async putCampaignBudget(campaignId: string, input: CampaignBudgetInput) {
     return toBudget(await http.put<BudgetDto>(`/campaigns/${encodeURIComponent(campaignId)}/budget`, toCampaignBudgetDto(input)));
   }

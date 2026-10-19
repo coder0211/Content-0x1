@@ -15,7 +15,7 @@ import type { CreateUserInput, ManagedUser, UpdateUserInput, UserQuery } from ".
 import {
   toAuditEntry,
   toModel,
-  toPricing,
+  toPricingRows,
   toProvider,
   toUser,
   type AuditLogDto,
@@ -23,7 +23,7 @@ import {
   type CreatePricingDto,
   type CreateUserDto,
   type ModelDto,
-  type PricingDto,
+  type PricingVersionDto,
   type ProviderDto,
   type UpdateModelDto,
   type UpdateProviderDto,
@@ -87,7 +87,9 @@ export class HttpSettingsRepository implements SettingsRepository {
   }
 
   async listModels(providerId?: string): Promise<AiModel[]> {
-    return (await http.get<ModelDto[]>("/settings/models", { query: { provider_id: providerId } })).map(toModel);
+    // GET /settings/models filters by `kind` only; narrow to one provider on the client.
+    const all = await http.get<ModelDto[]>("/settings/models");
+    return all.filter((m) => !providerId || m.provider_id === providerId).map(toModel);
   }
 
   async createModel(input: CreateModelInput): Promise<AiModel> {
@@ -112,16 +114,19 @@ export class HttpSettingsRepository implements SettingsRepository {
   }
 
   async listPricing(modelId: string): Promise<PricingRow[]> {
-    return (await http.get<PricingDto[]>(`/settings/models/${modelId}/pricing`)).map(toPricing);
+    const versions = await http.get<PricingVersionDto[]>(`/settings/models/${modelId}/pricing`);
+    return versions.flatMap((v) => toPricingRows(modelId, v));
   }
 
   async addPricing(modelId: string, input: NewPricingInput): Promise<PricingRow[]> {
     const body: CreatePricingDto = {
       pricing_version: input.pricingVersion,
-      effective_from: input.effectiveFrom,
       currency: input.currency,
-      prices: input.prices.map((p) => ({ unit: p.unit, unit_price: p.unitPrice })),
+      items: input.prices.map((p) => ({ unit: p.unit, unit_price: String(p.unitPrice) })),
     };
-    return (await http.post<PricingDto[]>(`/settings/models/${modelId}/pricing`, body)).map(toPricing);
+    // The API rejects a start in the past (`in_past`); "today" means "from now", so omit it.
+    if (Date.parse(input.effectiveFrom) > Date.now()) body.effective_from = input.effectiveFrom;
+    const created = await http.post<PricingVersionDto>(`/settings/models/${modelId}/pricing`, body);
+    return toPricingRows(modelId, created);
   }
 }

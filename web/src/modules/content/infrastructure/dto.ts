@@ -6,7 +6,6 @@ import type {
   ContentVersion,
   GenerateInput,
   JobAccepted,
-  JobSnapshot,
   Provenance,
   RewriteInput,
   WarningType,
@@ -48,24 +47,6 @@ export interface RewriteRequestDto {
   instruction: string;
   tone?: string[];
   custom_prompt?: string;
-}
-
-export interface JobDto {
-  id: string;
-  job_type: string;
-  status: JobStatus;
-  progress?: number | null;
-  result?: { asset_ids?: string[] } | null;
-  error?: {
-    code?: string;
-    kind?: string;
-    error_kind?: string;
-    message?: string;
-  } | null;
-  cost?: {
-    estimate?: number | string | null;
-    actual?: number | string | null;
-  } | null;
 }
 
 export interface ContentJsonDto {
@@ -128,9 +109,6 @@ export interface CampaignDto {
   status: string;
 }
 
-const num = (v: number | string | null | undefined): number | null =>
-  v == null || v === "" ? null : Number(v);
-
 export function toGenerateDto(i: GenerateInput): GenerateRequestDto {
   return {
     campaign_id: i.campaignId,
@@ -172,20 +150,6 @@ export function fromJobAccepted(d: JobAcceptedDto): JobAccepted {
           currency: c.currency === "VND" ? "VND" : "USD",
         }
       : null,
-  };
-}
-
-export function fromJob(d: JobDto): JobSnapshot {
-  return {
-    id: d.id,
-    type: d.job_type,
-    status: d.status,
-    progress: d.progress ?? 0,
-    assetIds: d.result?.asset_ids ?? [],
-    errorKind: d.error?.error_kind ?? d.error?.kind ?? d.error?.code ?? null,
-    errorMessage: d.error?.message ?? null,
-    costEstimate: num(d.cost?.estimate),
-    costActual: num(d.cost?.actual),
   };
 }
 

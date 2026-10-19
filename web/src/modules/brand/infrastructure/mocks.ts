@@ -8,6 +8,9 @@ import type { BrandAssetDto, BrandDto, BrandProfileDto, BrandVersionDto, Product
 /** Fixed id of the mock sample brand (campaign mocks reference the same id). */
 export const MOCK_BRAND_ID = "10000000-0000-4000-8000-000000000001";
 export const MOCK_PRODUCT_ID = "10000000-0000-4000-8000-000000000101";
+/** Seed music brand assets (the video mocks reject the unlicensed one with MUSIC_NOT_LICENSED). */
+export const MOCK_MUSIC_LICENSED_ID = "ba000000-0000-4000-8000-000000000001";
+export const MOCK_MUSIC_UNLICENSED_ID = "ba000000-0000-4000-8000-000000000002";
 const LEAD_ID = "00000000-0000-4000-8000-000000000002";
 
 interface Store {
@@ -74,6 +77,21 @@ function seed() {
     created_at: now,
     updated_at: now,
   });
+  // Music tracks (OQ-04): one licensed, one without licence — Video Studio demos MUSIC_NOT_LICENSED.
+  const track = (id: string, label: string, license: BrandAssetDto["license"]): BrandAssetDto => ({
+    id,
+    brand_id: MOCK_BRAND_ID,
+    file_id: id.replace(/^ba/, "fa"),
+    asset_type: "music",
+    label,
+    license,
+    license_valid: !!license,
+    file: { mime_type: "audio/mpeg", original_name: `${label}.mp3`, size_bytes: 2_400_000, duration_ms: 30_000, url: null, url_expires_at: null },
+    created_by: LEAD_ID,
+    created_at: now,
+  });
+  store.assets.set(MOCK_MUSIC_LICENSED_ID, track(MOCK_MUSIC_LICENSED_ID, "Nhạc nền tươi sáng (có license)", { source: "Thư viện nội bộ", license_type: "royalty_free" }));
+  store.assets.set(MOCK_MUSIC_UNLICENSED_ID, track(MOCK_MUSIC_UNLICENSED_ID, "Bản demo chưa có license", null));
 }
 
 export function resetBrandMocks(): void {

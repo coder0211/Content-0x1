@@ -26,6 +26,28 @@ tags:
     description: "Uploads and signed downloads"
   - name: audit
     description: "Audit log and notifications"
+  - name: brands
+    description: "Brand profiles, brand assets and products"
+  - name: campaigns
+    description: "Campaigns, briefs and content plans"
+  - name: content
+    description: "Content Studio generations, rewrites and transforms"
+  - name: images
+    description: "Image Studio generations, edits and variations"
+  - name: videos
+    description: "Video Studio projects, storyboards, productions and renders"
+  - name: jobs
+    description: "AI job status, events, cancel and retry"
+  - name: asset
+    description: "Asset library, versions and downloads"
+  - name: review
+    description: "Review queue, approve and request changes"
+  - name: budget
+    description: "Cost estimates, usage reports and budgets"
+  - name: settings
+    description: "Providers, models, pricing and prompt templates"
+  - name: dashboard
+    description: "Dashboard widgets"
 paths:
   /healthz:
     servers: [{url: /}]
@@ -1686,6 +1708,7 @@ paths:
       summary: List AI models with capabilities (provider.view)
       parameters:
         - {name: kind, in: query, schema: {$ref: "#/components/schemas/AIKind"}}
+        - {name: provider_id, in: query, description: "Only models of this provider", schema: {$ref: "#/components/schemas/UUID"}}
       responses:
         "200":
           description: Models
@@ -1824,7 +1847,10 @@ paths:
               properties:
                 pricing_version: {type: string, maxLength: 50}
                 currency: {type: string, example: USD}
-                effective_from: {type: string, format: date-time, description: "Defaults to now; must not be in the past"}
+                effective_from:
+                  type: string
+                  description: "RFC3339 date-time or date-only YYYY-MM-DD (00:00 Vietnam time, UTC+7). Defaults to now. A start earlier today (e.g. today's date) means now; earlier days are rejected (in_past)."
+                  example: "2026-11-01"
                 items: {type: array, minItems: 1, items: {$ref: "#/components/schemas/AIPriceItem"}}
       responses:
         "201":
@@ -1865,7 +1891,7 @@ paths:
     post:
       tags: [settings]
       operationId: createPromptTemplateVersion
-      summary: Create the next version of a template code (Lead/Admin; audited); optionally activate it
+      summary: Create the next version of a template code (Admin or Marketing Lead per SPEC-01 FR-CNT-08; audited); optionally activate it
       parameters: [{$ref: "#/components/parameters/CSRFToken"}]
       requestBody:
         required: true
@@ -1920,7 +1946,7 @@ paths:
     post:
       tags: [settings]
       operationId: activatePromptTemplate
-      summary: Make this version the active one of its code (previous active → retired; Lead/Admin; audited)
+      summary: Make this version the active one of its code (previous active → retired; Admin or Marketing Lead per FR-CNT-08; audited)
       parameters: [{$ref: "#/components/parameters/CSRFToken"}]
       responses:
         "200":
@@ -1942,7 +1968,7 @@ paths:
     post:
       tags: [settings]
       operationId: retirePromptTemplate
-      summary: Retire a version (Lead/Admin; audited)
+      summary: Retire a version (Admin or Marketing Lead per FR-CNT-08; audited)
       parameters: [{$ref: "#/components/parameters/CSRFToken"}]
       responses:
         "200":

@@ -65,12 +65,13 @@ function AssetDetailView({ asset }: { asset: AssetDetail }) {
   const needsTypography = requiresTypographyCheck(asset);
   const downloadForbidden = isApiError(download.error) && download.error.status === 403;
 
-  const onDownload = () =>
+  const onDownload = () => {
     download.mutate(undefined, {
       onSuccess: (link) => {
         window.open(link.url, "_blank", "noopener");
       },
     });
+  };
 
   return (
     <>

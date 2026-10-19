@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -312,8 +313,9 @@ func TestEstimateAndBudgetGate(t *testing.T) {
 	if spec := e.jobs.Specs[acc.JobID]; spec.BudgetOverrideBy == nil || *spec.BudgetOverrideBy != lead.UserID {
 		t.Fatal("override not recorded on the job")
 	}
-	if acts := e.audit.Actions(); len(acts) != 1 || acts[0] != "budget.override" {
-		t.Fatalf("audit %v", acts)
+	// budget.Reserve audits the override (budget.override); video must not add a duplicate row.
+	if e.budget.Overrides[acc.JobID] != "per_job" || slices.Contains(e.audit.Actions(), "budget.override") {
+		t.Fatalf("override %v audit %v", e.budget.Overrides, e.audit.Actions())
 	}
 }
 
@@ -347,8 +349,8 @@ func TestProductionDAGOrder(t *testing.T) {
 			t.Errorf("scene %d after render", sc.SequenceNo)
 		}
 	}
-	if !(r.index(domain.StepVoiceover) < r.index(domain.StepSubtitle) && r.index(domain.StepSubtitle) < render &&
-		render < r.index(domain.StepQC) && r.index(domain.StepQC) < r.index(domain.StepPublish)) {
+	if r.index(domain.StepVoiceover) >= r.index(domain.StepSubtitle) || r.index(domain.StepSubtitle) >= render ||
+		render >= r.index(domain.StepQC) || r.index(domain.StepQC) >= r.index(domain.StepPublish) {
 		t.Fatalf("order %v", r.order)
 	}
 	if r.polls < len(scenes)*3 {

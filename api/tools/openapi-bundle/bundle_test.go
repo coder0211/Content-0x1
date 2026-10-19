@@ -40,3 +40,21 @@ func TestDuplicatePathRejected(t *testing.T) {
 		t.Fatal("dangling $ref accepted")
 	}
 }
+
+func TestUndeclaredTagRejected(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, s string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("_base.yaml", "openapi: 3.1.0\ntags: [{name: a}]\npaths: {}\ncomponents: {schemas: {}}\n")
+	write("a.yaml", "paths:\n  /x: {get: {tags: [a], responses: {}}}\n")
+	if _, err := Bundle(dir); err != nil {
+		t.Fatalf("declared tag rejected: %v", err)
+	}
+	write("b.yaml", "paths:\n  /y: {get: {tags: [b], responses: {}}}\n")
+	if _, err := Bundle(dir); err == nil {
+		t.Fatal("undeclared tag accepted")
+	}
+}

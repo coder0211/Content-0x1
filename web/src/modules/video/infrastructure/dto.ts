@@ -178,6 +178,9 @@ export interface BrandAssetDto {
   asset_type: string;
   label: string | null;
   license?: unknown;
+  /** Complete and unexpired license (BrandAsset.license_valid) — the API's MUSIC_NOT_LICENSED rule. */
+  license_valid?: boolean;
+  /** @deprecated Legacy mock field; the API sends `license` + `license_valid`. */
   license_json?: unknown;
 }
 
@@ -340,6 +343,7 @@ export function fromBrandDto(d: BrandDto): BrandOption {
 
 export function fromBrandAssetDto(d: BrandAssetDto): MusicTrack {
   const license = d.license ?? d.license_json;
-  const licensed = !!license && typeof license === "object" && Object.keys(license as object).length > 0;
+  const licensed =
+    d.license_valid ?? (!!license && typeof license === "object" && Object.keys(license as object).length > 0);
   return { id: d.id, label: d.label || "Nhạc chưa đặt tên", licensed };
 }

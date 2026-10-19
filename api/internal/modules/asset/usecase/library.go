@@ -252,7 +252,13 @@ func (s *Service) CreateVersion(ctx context.Context, actor kernel.Actor, id kern
 				"field": "base_version_no", "current_version_no": a.CurrentVersionNo,
 			})
 		}
-		nv := NewVersion{ContentJSON: in.ContentJSON, ChangeNote: note, CreatedBy: actor.UserID}
+		content := in.ContentJSON
+		if a.Type == domain.TypeContent {
+			// body_html from the browser is never trusted (ACS-101): it is
+			// regenerated from body_text, escaped.
+			content = domain.SanitizeContentBody(content)
+		}
+		nv := NewVersion{ContentJSON: content, ChangeNote: note, CreatedBy: actor.UserID}
 		if cur != nil {
 			nv.Files = cur.Files
 		}

@@ -9,7 +9,6 @@ import type {
 } from "../domain/content";
 import {
   fromAsset,
-  fromJob,
   fromJobAccepted,
   fromVersion,
   toContentJson,
@@ -19,7 +18,6 @@ import {
   type BrandDto,
   type CampaignDto,
   type JobAcceptedDto,
-  type JobDto,
   type ProductDto,
   type VersionDto,
 } from "./dto";
@@ -57,12 +55,8 @@ export class HttpContentRepository implements ContentRepository {
     );
   }
 
-  async getJob(jobId: ID) {
-    return fromJob(await http.get<JobDto>(`/jobs/${enc(jobId)}`));
-  }
-
-  async cancelJob(jobId: ID) {
-    await http.post(`/jobs/${enc(jobId)}/cancel`);
+  async submitReview(assetId: ID) {
+    await http.post(`/assets/${enc(assetId)}/submit-review`, {});
   }
 
   async getAsset(assetId: ID) {

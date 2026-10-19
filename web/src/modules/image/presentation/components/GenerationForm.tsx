@@ -149,7 +149,7 @@ export function GenerationForm({ target, onSubmitted }: { target: StudioTarget |
           className="self-start"
           loading={suggest.starting || suggest.status === "queued" || suggest.status === "running"}
           disabled={!target}
-          onClick={() => suggest.start({ campaignId: target?.campaignId, preset: o.preset })}
+          onClick={() => suggest.start({ campaignId: target?.campaignId, brandId: target?.brandId, preset: o.preset })}
         >
           <MessageSquareText aria-hidden />
           Đề xuất prompt từ brief
