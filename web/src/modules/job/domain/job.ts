@@ -166,7 +166,7 @@ export function progressLabel(job: Job): string | undefined {
 }
 
 function lowerFirst(s: string): string {
-  return s ? s[0].toLowerCase() + s.slice(1) : s;
+  return s.charAt(0).toLowerCase() + s.slice(1);
 }
 
 /** The step that failed the job, if any. */
