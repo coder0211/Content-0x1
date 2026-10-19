@@ -1,0 +1,11 @@
+{
+  "name": "models/veo-3.1-generate-preview/operations/op123abc",
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/google.ai.generativelanguage.v1beta.PredictLongRunningResponse",
+    "generateVideoResponse": {
+      "raiMediaFilteredCount": 1,
+      "raiMediaFilteredReasons": ["The prompt could not be submitted. This prompt contains sensitive words that violate Google's Responsible AI practices."]
+    }
+  }
+}

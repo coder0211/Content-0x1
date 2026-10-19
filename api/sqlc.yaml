@@ -73,3 +73,10 @@ sql:
       go:
         <<: *gen
         out: internal/modules/job/adapter/postgres
+  - engine: postgresql
+    schema: migrations
+    queries: internal/modules/provider/adapter/postgres/queries.sql
+    gen:
+      go:
+        <<: *gen
+        out: internal/modules/provider/adapter/postgres
