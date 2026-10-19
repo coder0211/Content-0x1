@@ -1,0 +1,404 @@
+# Fragment owned by module provider (ACS-090 BE, ACS-038 BE, ACS-014).
+# Secrets are never returned: only secret_ref (an env var name) and
+# secret_configured (whether it resolves to a non-empty value).
+paths:
+  /settings/providers:
+    get:
+      tags: [settings]
+      operationId: listProviders
+      summary: List AI providers (provider.view)
+      responses:
+        "200":
+          description: Providers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIProvider" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /settings/providers/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    patch:
+      tags: [settings]
+      operationId: updateProvider
+      summary: Enable/disable a provider, change secret_ref or config_json (provider.manage; audited; applied to the live registry)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status: { $ref: "#/components/schemas/AIProviderStatus" }
+                secret_ref: { type: string, description: "Env var name holding the key, or 'none'", example: ANTHROPIC_API_KEY }
+                config_json: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Updated provider
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/AIProvider" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /settings/models:
+    get:
+      tags: [settings]
+      operationId: listModels
+      summary: List AI models with capabilities (provider.view)
+      parameters:
+        - { name: kind, in: query, schema: { $ref: "#/components/schemas/AIKind" } }
+      responses:
+        "200":
+          description: Models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIModel" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [settings]
+      operationId: createModel
+      summary: Add a model to a provider (provider.manage; audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider_id, model_code, kind]
+              properties:
+                provider_id: { $ref: "#/components/schemas/UUID" }
+                model_code: { type: string, maxLength: 100 }
+                kind: { $ref: "#/components/schemas/AIKind" }
+                capabilities: { $ref: "#/components/schemas/AICapabilities" }
+                concurrency_limit: { type: integer, minimum: 1 }
+                is_default: { type: boolean }
+                status: { $ref: "#/components/schemas/AIModelStatus" }
+      responses:
+        "201":
+          description: Created model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/AIModel" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /settings/models/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [settings]
+      operationId: getModel
+      summary: Get a model (provider.view)
+      responses:
+        "200":
+          description: Model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/AIModel" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [settings]
+      operationId: updateModel
+      summary: Update capabilities, concurrency, default flag or status (provider.manage; audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                capabilities: { $ref: "#/components/schemas/AICapabilities" }
+                concurrency_limit: { type: integer, minimum: 1 }
+                is_default: { type: boolean }
+                status: { $ref: "#/components/schemas/AIModelStatus" }
+      responses:
+        "200":
+          description: Updated model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/AIModel" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /settings/models/{id}/pricing:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [settings]
+      operationId: listModelPricing
+      summary: Pricing versions of a model, newest first (provider.view)
+      responses:
+        "200":
+          description: Pricing versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AIPricingVersion" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [settings]
+      operationId: addModelPricing
+      summary: Add an immutable pricing version; closes the current one at effective_from (provider.manage; audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pricing_version, currency, items]
+              properties:
+                pricing_version: { type: string, maxLength: 50 }
+                currency: { type: string, example: USD }
+                effective_from: { type: string, format: date-time, description: "Defaults to now; must not be in the past" }
+                items: { type: array, minItems: 1, items: { $ref: "#/components/schemas/AIPriceItem" } }
+      responses:
+        "201":
+          description: Created pricing version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/AIPricingVersion" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /settings/prompt-templates:
+    get:
+      tags: [settings]
+      operationId: listPromptTemplates
+      summary: List prompt template versions, optionally of one code
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PromptTemplate" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [settings]
+      operationId: createPromptTemplateVersion
+      summary: Create the next version of a template code (Lead/Admin; audited); optionally activate it
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, system_prompt, user_template]
+              properties:
+                code: { type: string, maxLength: 100 }
+                system_prompt: { type: string }
+                user_template: { type: string }
+                output_schema: { type: [object, "null"], additionalProperties: true }
+                activate: { type: boolean }
+      responses:
+        "201":
+          description: Created version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplate" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /settings/prompt-templates/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [settings]
+      operationId: getPromptTemplate
+      summary: Get a template version
+      responses:
+        "200":
+          description: Template
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplate" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /settings/prompt-templates/{id}/activate:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [settings]
+      operationId: activatePromptTemplate
+      summary: Make this version the active one of its code (previous active → retired; Lead/Admin; audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplate" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /settings/prompt-templates/{id}/retire:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [settings]
+      operationId: retirePromptTemplate
+      summary: Retire a version (Lead/Admin; audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "200":
+          description: Retired
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/PromptTemplate" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+components:
+  schemas:
+    AIKind: { type: string, enum: [text, image, video, voice] }
+    AIProviderStatus: { type: string, enum: [active, disabled] }
+    AIModelStatus: { type: string, enum: [active, disabled] }
+    PromptTemplateStatus: { type: string, enum: [draft, active, retired] }
+    AICapabilities:
+      type: object
+      additionalProperties: true
+      description: "Model capability map (ports.Capabilities), e.g. aspect_ratios, sizes, max_duration_sec, voices, structured_output"
+    AIProvider:
+      type: object
+      required: [id, code, name, kinds, status, secret_ref, secret_configured, adapter_available, config_json, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        code: { type: string, example: anthropic }
+        name: { type: string }
+        kinds: { type: array, items: { $ref: "#/components/schemas/AIKind" } }
+        status: { $ref: "#/components/schemas/AIProviderStatus" }
+        secret_ref: { type: string }
+        secret_configured: { type: boolean }
+        adapter_available: { type: boolean }
+        config_json: { type: object, additionalProperties: true }
+        updated_at: { type: string, format: date-time }
+    AIModel:
+      type: object
+      required: [id, provider_id, provider_code, provider_status, model_code, kind, capabilities, concurrency_limit, is_default, status, adapter_available, usable]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        provider_id: { $ref: "#/components/schemas/UUID" }
+        provider_code: { type: string }
+        provider_status: { $ref: "#/components/schemas/AIProviderStatus" }
+        model_code: { type: string }
+        kind: { $ref: "#/components/schemas/AIKind" }
+        capabilities: { $ref: "#/components/schemas/AICapabilities" }
+        concurrency_limit: { type: integer }
+        is_default: { type: boolean }
+        status: { $ref: "#/components/schemas/AIModelStatus" }
+        adapter_available: { type: boolean }
+        usable: { type: boolean }
+    AIPriceItem:
+      type: object
+      required: [unit, unit_price]
+      properties:
+        unit: { type: string, example: input_token }
+        unit_price: { type: string, description: "Decimal as string", example: "0.000003" }
+    AIPricingVersion:
+      type: object
+      required: [pricing_version, currency, effective_from, effective_to, is_current, items]
+      properties:
+        pricing_version: { type: string }
+        currency: { type: string }
+        effective_from: { type: string, format: date-time }
+        effective_to: { type: [string, "null"], format: date-time }
+        is_current: { type: boolean }
+        items: { type: array, items: { $ref: "#/components/schemas/AIPriceItem" } }
+    PromptTemplate:
+      type: object
+      required: [id, code, version, status, system_prompt, user_template, output_schema, created_by, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        code: { type: string }
+        version: { type: integer }
+        status: { $ref: "#/components/schemas/PromptTemplateStatus" }
+        system_prompt: { type: string }
+        user_template: { type: string }
+        output_schema: { type: [object, "null"], additionalProperties: true }
+        created_by: { oneOf: [{ $ref: "#/components/schemas/UUID" }, { type: "null" }] }
+        created_at: { type: string, format: date-time }

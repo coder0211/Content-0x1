@@ -52,3 +52,13 @@ Ngày chốt: 18/10/2026. Nguyên tắc: phương án **cân bằng** giữa chi
 - **Architecture enforcement:** depguard (framework bans per layer) + `internal/archtest` (module dependency table, R4) which runs in `go test ./...`. `go-arch-lint` is not used; archtest replaces it.
 - **OpenAPI:** fragments `api/openapi/<module>.yaml` bundled by `tools/openapi-bundle` into `api/openapi.yaml` (OpenAPI 3.1, servers `/api/v1`; health endpoints override to `/`). A test fails when the bundle is stale.
 - **Placeholders:** `job, budget, asset, brand, campaign, provider, content` have placeholder `module.go` files that publish the in-memory fakes from `<m>test`, so the server runs end-to-end today; their owners replace `Register`.
+
+## Agent 4 — AI providers + provider config
+
+- **OQ-01 adapters:** `anthropic` (claude-sonnet-5-5, JSON-schema structured output via `output_config.format`), `openai` (gpt-image-1 generate/edit, non-native aspect ratios by centre-crop), `veo` (Gemini API long-running ops; no cancel → `ErrCancelUnsupported`), `kenburns` (FFmpeg zoompan, cost 0, outputs parked in object storage so any worker can download), `gcp_tts` (vi-VN, SSML marks → word timings; API key or service-account JSON). Shared HTTP/error mapping in `providers/vendorhttp`. Details and price assumptions in `docs/spike-providers.md` (TL must verify live).
+- **Registry sync:** the provider module pushes each `ai_providers` row (status, secret_ref, config_json) into the process registry at start-up, immediately after an admin update, and every 30 s in server and worker (runner `provider-registry-sync`) so a disable in the UI reaches the worker without restart. A disabled provider surfaces as `CAPABILITY_NOT_SUPPORTED`.
+- **Defaults:** the `fake` models of 0011 remain the defaults so local/CI runs need no key; `ResolveModel` skips models whose adapter is not registered (e.g. fake in production) and falls back to the first usable real model.
+- **Pricing immutability:** migration 0071 blocks UPDATE/DELETE of `model_pricing` rows except closing `effective_to`; new prices are added as versions via `POST /settings/models/{id}/pricing`.
+- **Secrets:** API never returns key material — only `secret_ref` (env var name) and `secret_configured`.
+- **Prompt templates (ACS-038 BE):** creating a version allocates `max(version)+1` under a per-code advisory lock; activating retires the previous active version. Lead/Admin only; reads require `provider.view`.
+- **Without DB** (`c.DB == nil`) `provider.Register` still publishes the in-memory fake from `providertest`.

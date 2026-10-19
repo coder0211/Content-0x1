@@ -254,7 +254,7 @@ func (a *Adapter) GetStatus(ctx context.Context, id string) (ports.VideoStatus, 
 	}
 	rc, _, err := a.open(ctx, u)
 	if err != nil {
-		return ports.VideoStatus{State: ports.VideoFailed, Raw: json.RawMessage(`{"provider":"kenburns"}`),
+		return ports.VideoStatus{State: ports.VideoFailed, Raw: json.RawMessage(`{"provider":"kenburns"}`), //nolint:nilerr // a missing clip is a failed job state, not a call error
 			Error: vendorhttp.Errorf(Code, ports.ErrKindUnknown, "output_missing", "rendered clip is no longer available")}, nil
 	}
 	_ = rc.Close()

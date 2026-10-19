@@ -126,7 +126,7 @@ type googleError struct {
 func classify(status int, h http.Header, body []byte) *ports.ProviderError {
 	var ge googleError
 	if json.Unmarshal(body, &ge) != nil || ge.Error.Message == "" {
-		return nil
+		return nil //nolint:nilerr // not a vendor error envelope: caller falls back to ByStatus
 	}
 	code := ge.Error.Status
 	if code == "" {

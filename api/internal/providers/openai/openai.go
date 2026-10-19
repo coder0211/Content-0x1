@@ -161,7 +161,7 @@ type errorBody struct {
 func classify(status int, h http.Header, body []byte) *ports.ProviderError {
 	var eb errorBody
 	if json.Unmarshal(body, &eb) != nil || eb.Error.Message == "" {
-		return nil
+		return nil //nolint:nilerr // not a vendor error envelope: caller falls back to ByStatus
 	}
 	code := eb.Error.Type
 	if eb.Error.Code != nil && *eb.Error.Code != "" {
