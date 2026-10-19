@@ -103,6 +103,13 @@ sql:
         out: internal/modules/file/adapter/postgres
   - engine: postgresql
     schema: migrations
+    queries: internal/modules/image/adapter/postgres/queries.sql
+    gen:
+      go:
+        <<: *gen
+        out: internal/modules/image/adapter/postgres
+  - engine: postgresql
+    schema: migrations
     queries: internal/modules/job/adapter/postgres/queries.sql
     gen:
       go:
