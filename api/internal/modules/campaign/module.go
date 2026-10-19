@@ -1,24 +1,33 @@
-// Package campaign wires the campaign module.
-//
-// PLACEHOLDER (Agent 1): until the campaign module is implemented, Register
-// publishes the in-memory fake from campaigntest so dependent modules compile and run.
-// The owning agent replaces the body of Register (keeping its signature).
+// Package campaign wires the campaign module (ACS-025, ACS-037 storage):
+// campaigns with a shared brief, the status state machine, members and the
+// approved content plan.
 package campaign
 
 import (
+	"github.com/go-chi/chi/v5"
+
 	"github.com/be/acs/api/internal/app/registry"
-	"github.com/be/acs/api/internal/modules/campaign/campaigntest"
+	camphttp "github.com/be/acs/api/internal/modules/campaign/adapter/http"
+	"github.com/be/acs/api/internal/modules/campaign/adapter/postgres"
+	"github.com/be/acs/api/internal/modules/campaign/usecase"
 )
 
 // Module is the campaign module.
-type Module struct{}
+type Module struct {
+	Svc     *usecase.Service
+	handler *camphttp.Handler
+}
 
 // Name implements registry.Module.
 func (*Module) Name() string { return "campaign" }
 
-// Register publishes APIs.Campaigns.
+// Routes implements registry.HTTPModule.
+func (m *Module) Routes(r chi.Router) { m.handler.Routes(r) }
+
+// Register builds the module and publishes APIs.Campaigns.
 func Register(c *registry.Container) (registry.Module, error) {
-	c.Logger.Warn("campaign module is a placeholder (in-memory fake)")
-	c.APIs.Campaigns = campaigntest.NewAPI()
-	return &Module{}, nil
+	svc := &usecase.Service{Tx: c.Tx, Repo: postgres.NewRepository(c.DB), Clock: c.Clock, Audit: c.APIs.Audit,
+		Brands: c.APIs.Brands, Users: c.APIs.Identity}
+	c.APIs.Campaigns = svc
+	return &Module{Svc: svc, handler: &camphttp.Handler{Svc: svc}}, nil
 }

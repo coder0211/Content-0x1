@@ -1,0 +1,256 @@
+# Fragment owned by module campaign (ACS-025, ACS-037 storage). Only `paths` and `components` are merged.
+# POST /campaigns/{id}/plan-generations (job content_plan) is served and documented by the content module.
+paths:
+  /campaigns:
+    get:
+      tags: [campaigns]
+      operationId: listCampaigns
+      summary: List campaigns (brand.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: brand_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/CampaignStatus" } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: mine, in: query, description: Only campaigns created by or assigned to me., schema: { type: boolean } }
+      responses:
+        "200":
+          description: Campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Campaign" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [campaigns]
+      operationId: createCampaign
+      summary: Create a draft campaign (campaign.manage)
+      description: >-
+        Missing brief fields → 400 VALIDATION_FAILED with one detail per field.
+        The campaign budget is set separately with PUT /campaigns/{id}/budget (budget.manage).
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [brand_id, name, goal, brief]
+              properties:
+                brand_id: { $ref: "#/components/schemas/UUID" }
+                name: { type: string, maxLength: 200 }
+                goal: { $ref: "#/components/schemas/CampaignGoal" }
+                brief: { $ref: "#/components/schemas/CampaignBrief" }
+                start_date: { type: [string, "null"], format: date }
+                end_date: { type: [string, "null"], format: date }
+                member_ids: { type: array, items: { $ref: "#/components/schemas/UUID" } }
+      responses:
+        "201": { $ref: "#/components/responses/CampaignResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /campaigns/member-candidates:
+    get:
+      tags: [campaigns]
+      operationId: listCampaignMemberCandidates
+      summary: Active users who can generate content, for the member picker (campaign.manage)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/CampaignMember" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /campaigns/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [campaigns]
+      operationId: getCampaign
+      summary: Campaign with brief, members and content plan (brand.view)
+      responses:
+        "200": { $ref: "#/components/responses/CampaignResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [campaigns]
+      operationId: updateCampaign
+      summary: Edit brief/header, change status, replace members (campaign.manage)
+      description: >-
+        Creators may edit only campaigns they created or are members of (403 otherwise); members are
+        changed by the creator or Marketing Lead/Admin. Status follows SPEC-03 §2
+        (draft → in_progress ↔ review → completed → archived, any → archived); an invalid transition
+        (e.g. draft → completed) or editing an archived campaign → 409 INVALID_STATE_TRANSITION.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: { type: string, maxLength: 200 }
+                goal: { $ref: "#/components/schemas/CampaignGoal" }
+                brief: { $ref: "#/components/schemas/CampaignBrief" }
+                start_date: { type: string, description: YYYY-MM-DD or empty to clear }
+                end_date: { type: string, description: YYYY-MM-DD or empty to clear }
+                status: { $ref: "#/components/schemas/CampaignStatus" }
+                member_ids: { type: array, items: { $ref: "#/components/schemas/UUID" } }
+      responses:
+        "200": { $ref: "#/components/responses/CampaignResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /campaigns/{id}/plan:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    put:
+      tags: [campaigns]
+      operationId: saveCampaignPlan
+      summary: Approve (and optionally edit) the content plan → campaigns.content_plan (campaign.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan]
+              properties:
+                plan: { $ref: "#/components/schemas/CampaignContentPlan" }
+      responses:
+        "200": { $ref: "#/components/responses/CampaignResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /campaigns/{id}/plan-proposal:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    delete:
+      tags: [campaigns]
+      operationId: discardCampaignPlanProposal
+      summary: Discard the pending AI plan proposal (campaign.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  responses:
+    CampaignResponse:
+      description: Campaign detail
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data:
+                allOf:
+                  - { $ref: "#/components/schemas/Campaign" }
+                  - type: object
+                    required: [members]
+                    properties:
+                      members: { type: array, items: { $ref: "#/components/schemas/CampaignMember" } }
+              meta: { $ref: "#/components/schemas/Meta" }
+  schemas:
+    CampaignStatus:
+      type: string
+      enum: [draft, in_progress, review, completed, archived]
+    CampaignGoal:
+      type: string
+      enum: [awareness, engagement, lead, conversion]
+    CampaignFormat:
+      type: object
+      required: [type, count]
+      properties:
+        type: { type: string, pattern: "^[a-z0-9_]{1,40}$", description: "e.g. facebook_post, poster, short_video" }
+        count: { type: integer, minimum: 1, maximum: 50 }
+    CampaignBrief:
+      type: object
+      additionalProperties: false
+      required: [target_audience, key_message, channels, formats, deadline]
+      properties:
+        product_ids: { type: array, items: { $ref: "#/components/schemas/UUID" } }
+        target_audience: { type: string }
+        key_message: { type: string }
+        verified_offer: { type: string }
+        channels: { type: array, minItems: 1, items: { type: string, pattern: "^[a-z0-9_]{1,40}$" } }
+        formats: { type: array, minItems: 1, items: { $ref: "#/components/schemas/CampaignFormat" } }
+        deadline: { type: string, format: date }
+        notes: { type: string }
+    CampaignPlanItem:
+      type: object
+      required: [topic, format]
+      properties:
+        id: { type: string, description: Stable item id (generated as item-N when absent). }
+        topic: { type: string }
+        angle: { type: string }
+        channel: { type: string }
+        format: { type: string }
+        publish_date: { type: string, description: YYYY-MM-DD or empty }
+        notes: { type: string }
+        done: { type: boolean }
+    CampaignContentPlan:
+      type: object
+      required: [items]
+      properties:
+        summary: { type: string }
+        themes: { type: array, items: { type: string } }
+        items: { type: array, minItems: 1, maxItems: 200, items: { $ref: "#/components/schemas/CampaignPlanItem" } }
+    CampaignMember:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        email: { type: string }
+    Campaign:
+      type: object
+      required: [id, brand_id, name, goal, status, next_statuses, brief, start_date, end_date, content_plan, content_plan_approved_by,
+        content_plan_approved_at, content_plan_proposal, content_plan_proposed_at, member_ids, created_by, created_at, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        brand_id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        goal: { $ref: "#/components/schemas/CampaignGoal" }
+        status: { $ref: "#/components/schemas/CampaignStatus" }
+        next_statuses: { type: array, items: { $ref: "#/components/schemas/CampaignStatus" } }
+        brief: { $ref: "#/components/schemas/CampaignBrief" }
+        start_date: { type: [string, "null"], format: date }
+        end_date: { type: [string, "null"], format: date }
+        content_plan:
+          description: Approved plan (ACS-037).
+          oneOf:
+            - { $ref: "#/components/schemas/CampaignContentPlan" }
+            - { type: "null" }
+        content_plan_approved_by: { type: [string, "null"], format: uuid }
+        content_plan_approved_at: { type: [string, "null"], format: date-time }
+        content_plan_proposal:
+          description: Latest AI proposal awaiting approval (written by the content_plan job).
+          oneOf:
+            - { $ref: "#/components/schemas/CampaignContentPlan" }
+            - { type: "null" }
+        content_plan_proposed_at: { type: [string, "null"], format: date-time }
+        member_ids: { type: array, items: { $ref: "#/components/schemas/UUID" } }
+        created_by: { $ref: "#/components/schemas/UUID" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

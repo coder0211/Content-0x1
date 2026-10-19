@@ -66,3 +66,17 @@ sql:
       go:
         <<: *gen
         out: internal/modules/file/adapter/postgres
+  - engine: postgresql
+    schema: migrations
+    queries: internal/modules/brand/adapter/postgres/queries.sql
+    gen:
+      go:
+        <<: *gen
+        out: internal/modules/brand/adapter/postgres
+  - engine: postgresql
+    schema: migrations
+    queries: internal/modules/campaign/adapter/postgres/queries.sql
+    gen:
+      go:
+        <<: *gen
+        out: internal/modules/campaign/adapter/postgres

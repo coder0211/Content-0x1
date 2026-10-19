@@ -1,0 +1,425 @@
+# Fragment owned by module brand (ACS-020..023). Only `paths` and `components` are merged.
+paths:
+  /brands:
+    get:
+      tags: [brands]
+      operationId: listBrands
+      summary: List brands (brand.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Brands with their current version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Brand" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [brands]
+      operationId: createBrand
+      summary: Create a brand and its version 1 (brand.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 200 }
+                profile: { $ref: "#/components/schemas/BrandProfile" }
+      responses:
+        "201": { $ref: "#/components/responses/BrandResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /brands/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [brands]
+      operationId: getBrand
+      summary: Brand with current_version (brand.view)
+      responses:
+        "200": { $ref: "#/components/responses/BrandResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [brands]
+      operationId: updateBrand
+      summary: Rename and/or save a new profile version (brand.manage)
+      description: >-
+        A changed profile creates a new brand_versions row. `expected_version_no` must equal
+        the current version number, otherwise 409 VERSION_CONFLICT (optimistic lock).
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version_no]
+              properties:
+                name: { type: string, maxLength: 200 }
+                profile: { $ref: "#/components/schemas/BrandProfile" }
+                expected_version_no: { type: integer, minimum: 1 }
+      responses:
+        "200": { $ref: "#/components/responses/BrandResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [brands]
+      operationId: deleteBrand
+      summary: Soft-delete a brand (brand.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /brands/{id}/versions:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [brands]
+      operationId: listBrandVersions
+      summary: Version history, newest first (brand.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/BrandVersion" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /brands/{id}/assets:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [brands]
+      operationId: listBrandAssets
+      summary: Logo, reference images, documents and music (brand.view)
+      parameters:
+        - name: asset_type
+          in: query
+          description: Comma-separated asset types.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Brand assets with short-lived signed URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/BrandAsset" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [brands]
+      operationId: addBrandAsset
+      summary: Attach an uploaded (ready) file to the brand (brand.manage)
+      description: Music requires `license` with `source` and `license_type` (OQ-04).
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, asset_type]
+              properties:
+                file_id: { $ref: "#/components/schemas/UUID" }
+                asset_type: { $ref: "#/components/schemas/BrandAssetType" }
+                label: { type: string, maxLength: 300 }
+                license: { $ref: "#/components/schemas/BrandMusicLicense" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/BrandAsset" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "415": { $ref: "#/components/responses/UnsupportedMediaType" }
+  /brands/{id}/assets/{brandAssetId}:
+    parameters:
+      - { $ref: "#/components/parameters/PathID" }
+      - { name: brandAssetId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [brands]
+      operationId: deleteBrandAsset
+      summary: Detach an asset (brand.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /brands/{id}/products:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [brands]
+      operationId: listProducts
+      summary: Products of a brand (brand.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Product" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [brands]
+      operationId: createProduct
+      summary: Create a product (brand.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+      responses:
+        "201": { $ref: "#/components/responses/ProductResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /products/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [brands]
+      operationId: getProduct
+      summary: One product (brand.view)
+      responses:
+        "200": { $ref: "#/components/responses/ProductResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [brands]
+      operationId: updateProduct
+      summary: Edit a product; omitted fields are unchanged (brand.manage)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProductInput" }
+      responses:
+        "200": { $ref: "#/components/responses/ProductResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  responses:
+    BrandResponse:
+      description: Brand
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: { $ref: "#/components/schemas/Brand" }
+              meta: { $ref: "#/components/schemas/Meta" }
+    ProductResponse:
+      description: Product
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: { $ref: "#/components/schemas/Product" }
+              meta: { $ref: "#/components/schemas/Meta" }
+  schemas:
+    BrandColor:
+      type: object
+      required: [name, hex]
+      properties:
+        name: { type: string }
+        hex: { type: string, pattern: "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$" }
+    BrandPersona:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        pain_points: { type: array, items: { type: string } }
+        motivations: { type: array, items: { type: string } }
+    BrandProfile:
+      type: object
+      additionalProperties: false
+      properties:
+        description: { type: string }
+        colors: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/BrandColor" } }
+        typography:
+          type: object
+          properties:
+            heading: { type: string }
+            body: { type: string }
+        tone_of_voice: { type: array, items: { type: string } }
+        preferred_words: { type: array, items: { type: string } }
+        forbidden_words: { type: array, items: { type: string } }
+        default_ctas: { type: array, items: { type: string } }
+        audience_personas: { type: array, items: { $ref: "#/components/schemas/BrandPersona" } }
+        notes: { type: string }
+    BrandVersion:
+      type: object
+      required: [id, version_no, profile, created_by, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        version_no: { type: integer }
+        profile: { $ref: "#/components/schemas/BrandProfile" }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+    Brand:
+      type: object
+      required: [id, name, current_version, created_by, created_at, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        current_version: { $ref: "#/components/schemas/BrandVersion" }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProductOffer:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+        valid_from: { type: [string, "null"], format: date }
+        valid_to: { type: [string, "null"], format: date }
+        status:
+          type: string
+          enum: [active, expired, upcoming]
+          description: Response only. Expired offers are never sent to prompts.
+    ProductProof:
+      type: object
+      required: [text]
+      properties:
+        type: { type: string, enum: [testimonial, statistic, award, certification, media, other] }
+        text: { type: string }
+        source: { type: string }
+        verified: { type: boolean, description: Only verified proof reaches prompts. }
+    ProductFacts:
+      type: object
+      properties:
+        usp: { type: array, items: { type: string } }
+        price:
+          type: [object, "null"]
+          properties:
+            amount: { type: number }
+            currency: { type: string, minLength: 3, maxLength: 3 }
+            note: { type: string }
+        offers: { type: array, items: { $ref: "#/components/schemas/ProductOffer" } }
+        policies: { type: array, items: { type: string } }
+        proof: { type: array, items: { $ref: "#/components/schemas/ProductProof" } }
+    ProductInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 200 }
+        description: { type: string }
+        facts: { $ref: "#/components/schemas/ProductFacts" }
+        status: { type: string, enum: [active, archived] }
+    Product:
+      type: object
+      required: [id, brand_id, name, description, facts, status, created_by, created_at, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        brand_id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        description: { type: string }
+        facts: { $ref: "#/components/schemas/ProductFacts" }
+        status: { type: string, enum: [active, archived] }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    BrandAssetType:
+      type: string
+      enum: [logo, reference_image, font, document, sample_content, music]
+    BrandMusicLicense:
+      type: object
+      required: [source, license_type]
+      properties:
+        source: { type: string }
+        license_type: { type: string }
+        expires_at: { type: string, format: date }
+        attribution: { type: string }
+        notes: { type: string }
+    BrandAsset:
+      type: object
+      required: [id, brand_id, file_id, asset_type, label, license, license_valid, file, created_by, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        brand_id: { $ref: "#/components/schemas/UUID" }
+        file_id: { $ref: "#/components/schemas/UUID" }
+        asset_type: { $ref: "#/components/schemas/BrandAssetType" }
+        label: { type: string }
+        license:
+          oneOf:
+            - { $ref: "#/components/schemas/BrandMusicLicense" }
+            - { type: "null" }
+        license_valid: { type: boolean, description: Complete and unexpired license (music usable in videos). }
+        file:
+          type: [object, "null"]
+          properties:
+            mime_type: { type: string }
+            original_name: { type: string }
+            size_bytes: { type: integer }
+            width: { type: integer }
+            height: { type: integer }
+            duration_ms: { type: integer }
+            url: { type: [string, "null"] }
+            url_expires_at: { type: [string, "null"], format: date-time }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }

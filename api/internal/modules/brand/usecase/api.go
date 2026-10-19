@@ -102,9 +102,12 @@ type BrandAsset struct {
 	FileID    kernel.ID
 	AssetType string // logo | reference_image | font | document | sample_content | music
 	Label     string
-	// License is asset_files.license_json; music without a license must not
-	// be used in videos (ACS-023).
+	// License is brand_assets.license_json ({source, license_type,
+	// expires_at?}); music without a license must not be used in videos
+	// (ACS-023). nil when absent.
 	License json.RawMessage
+	// LicenseValid reports a complete, unexpired license (additive).
+	LicenseValid bool
 }
 
 // API is the brand module's public interface.
@@ -116,4 +119,13 @@ type API interface {
 	GetBrandAsset(ctx context.Context, brandAssetID kernel.ID) (BrandAsset, error)
 	// ListBrandAssets lists assets of a brand, optionally filtered by type.
 	ListBrandAssets(ctx context.Context, brandID kernel.ID, assetTypes ...string) ([]BrandAsset, error)
+	// RequireLicensedMusic returns a music asset of brandID that has a
+	// complete, unexpired license (additive, ACS-023). NOT_FOUND when the
+	// asset is missing, of another brand or not music; VALIDATION_FAILED
+	// {field: music_asset_id, issue: license_required} when unlicensed.
+	RequireLicensedMusic(ctx context.Context, brandID, brandAssetID kernel.ID) (BrandAsset, error)
 }
+
+// ErrMusicLicenseRequired is returned by RequireLicensedMusic.
+var ErrMusicLicenseRequired = kernel.Validation(kernel.FieldIssue("music_asset_id", "license_required")).
+	WithMessage("Track nhạc chưa có giấy phép hợp lệ, không thể dùng trong video")

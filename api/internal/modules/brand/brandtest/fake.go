@@ -61,6 +61,17 @@ func (a *API) GetBrandAsset(_ context.Context, id kernel.ID) (usecase.BrandAsset
 	return ba, nil
 }
 
+func (a *API) RequireLicensedMusic(_ context.Context, brandID, id kernel.ID) (usecase.BrandAsset, error) {
+	ba, ok := a.Assets[id]
+	if !ok || ba.BrandID != brandID || ba.AssetType != "music" {
+		return usecase.BrandAsset{}, kernel.ErrNotFound
+	}
+	if !ba.LicenseValid {
+		return usecase.BrandAsset{}, usecase.ErrMusicLicenseRequired
+	}
+	return ba, nil
+}
+
 func (a *API) ListBrandAssets(_ context.Context, brandID kernel.ID, types ...string) ([]usecase.BrandAsset, error) {
 	var out []usecase.BrandAsset
 	for _, ba := range a.Assets {
