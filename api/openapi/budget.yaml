@@ -1,0 +1,277 @@
+# Fragment owned by module budget (SPEC-02 §6, SPEC-04 §2.9).
+paths:
+  /cost-estimates:
+    post:
+      tags: [budget]
+      operationId: createCostEstimate
+      summary: Price a request without creating a job (generate.run). Used by the studios' cost chip.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BudgetEstimateRequest" }
+      responses:
+        "200":
+          description: Estimate with breakdown and limits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/BudgetEstimate" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /usage/summary:
+    get:
+      tags: [budget]
+      operationId: getUsageSummary
+      summary: AI spend grouped by a dimension, split by cost_source (usage.view)
+      parameters:
+        - { name: from, in: query, description: "Inclusive date (UTC); default first day of the month", schema: { type: string, format: date } }
+        - { name: to, in: query, description: "Inclusive date (UTC); default today", schema: { type: string, format: date } }
+        - { name: group_by, in: query, schema: { type: string, enum: [day, campaign, provider, model, user, job_type], default: day } }
+      responses:
+        "200":
+          description: Summary; totals equal the sum of rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/UsageSummary" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /settings/budgets:
+    get:
+      tags: [budget]
+      operationId: getBudgetSettings
+      summary: Per-job limits, the current global budget and campaign budgets (usage.view)
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/BudgetSettings" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    patch:
+      tags: [budget]
+      operationId: updateBudgetSettings
+      summary: Update per-job limits and the global budget (budget.manage, audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BudgetSettingsPatch" }
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/BudgetSettings" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /campaigns/{id}/budget:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [budget]
+      operationId: getCampaignBudget
+      summary: The campaign's budget, or null (usage.view)
+      responses:
+        "200":
+          description: Budget or null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    oneOf:
+                      - { $ref: "#/components/schemas/Budget" }
+                      - { type: "null" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    put:
+      tags: [budget]
+      operationId: putCampaignBudget
+      summary: Create or update the campaign's budget (budget.manage, audited)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CampaignBudgetInput" }
+      responses:
+        "200":
+          description: Budget
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/Budget" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    BudgetEstimateRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [text, image, video] }
+        provider: { type: string, description: "Empty → default model of the kind" }
+        model: { type: string }
+        campaign_id: { type: [string, "null"], format: uuid }
+        prompt_chars: { type: integer, minimum: 0, description: "text: prompt length in characters" }
+        max_output_tokens: { type: integer, minimum: 0 }
+        count: { type: integer, minimum: 1, maximum: 8, description: "image: number of images" }
+        size: { type: string, example: "1024" }
+        quality: { type: string, enum: [standard, high] }
+        clip_seconds: { type: number, minimum: 0, description: "video: total generated clip seconds" }
+        resolution: { type: string, enum: [720p, 1080p] }
+        voiceover_chars: { type: integer, minimum: 0 }
+    BudgetEstimateLine:
+      type: object
+      required: [item, provider, model, unit, units, unit_price, amount]
+      properties:
+        item: { type: string, example: scene_clips }
+        provider: { type: string }
+        model: { type: string }
+        unit: { type: string, example: video_second_1080p }
+        units: { type: number }
+        unit_price: { type: number }
+        amount: { type: number }
+    BudgetLimits:
+      type: object
+      required: [per_job_limit, campaign_remaining, global_remaining]
+      properties:
+        per_job_limit: { type: number }
+        campaign_remaining: { type: [number, "null"] }
+        global_remaining: { type: number }
+    BudgetEstimate:
+      type: object
+      required: [breakdown, total, pricing_version, limits, requires_override, blocked]
+      properties:
+        breakdown: { type: array, items: { $ref: "#/components/schemas/BudgetEstimateLine" } }
+        total: { $ref: "#/components/schemas/Money" }
+        pricing_version: { type: string }
+        limits: { $ref: "#/components/schemas/BudgetLimits" }
+        requires_override: { type: boolean, description: "Estimate exceeds the per-job limit (Lead/Admin may override)" }
+        blocked: { type: boolean, description: "A hard-stop budget (global/campaign) would refuse the job" }
+    Budget:
+      type: object
+      required: [id, scope, campaign_id, period_start, period_end, limit_amount, reserved_amount, spent_amount, remaining_amount, percent_used, currency, alert_thresholds, alerts_sent, hard_stop, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        scope: { type: string, enum: [global, campaign] }
+        campaign_id: { type: [string, "null"], format: uuid }
+        campaign_name: { type: [string, "null"] }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        limit_amount: { type: number }
+        reserved_amount: { type: number }
+        spent_amount: { type: number }
+        remaining_amount: { type: number }
+        percent_used: { type: number }
+        currency: { type: string, example: USD }
+        alert_thresholds: { type: array, items: { type: integer } }
+        alerts_sent: { type: array, items: { type: integer } }
+        hard_stop: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    BudgetSettings:
+      type: object
+      required: [currency, per_job_limits, global_template, global, campaigns, max_concurrent_video_jobs_per_user, updated_by, updated_at]
+      properties:
+        currency: { type: string, example: USD }
+        per_job_limits:
+          type: object
+          required: [text, image, video]
+          properties:
+            text: { type: number }
+            image: { type: number }
+            video: { type: number }
+        global_template:
+          type: object
+          required: [monthly_limit, alert_thresholds, hard_stop]
+          properties:
+            monthly_limit: { type: number }
+            alert_thresholds: { type: array, items: { type: integer } }
+            hard_stop: { type: boolean }
+        global: { $ref: "#/components/schemas/Budget" }
+        campaigns: { type: array, items: { $ref: "#/components/schemas/Budget" } }
+        max_concurrent_video_jobs_per_user: { type: integer }
+        updated_by: { type: [string, "null"], format: uuid }
+        updated_at: { type: string, format: date-time }
+    BudgetSettingsPatch:
+      type: object
+      properties:
+        per_job_limits:
+          type: object
+          properties:
+            text: { type: number, minimum: 0 }
+            image: { type: number, minimum: 0 }
+            video: { type: number, minimum: 0 }
+        global:
+          type: object
+          properties:
+            limit_amount: { type: number, minimum: 0 }
+            alert_thresholds: { type: array, items: { type: integer, minimum: 1, maximum: 100 }, maxItems: 5 }
+            hard_stop: { type: boolean }
+        max_concurrent_video_jobs_per_user: { type: integer, minimum: 1, maximum: 50 }
+    CampaignBudgetInput:
+      type: object
+      required: [limit_amount]
+      properties:
+        limit_amount: { type: number, minimum: 0 }
+        currency: { type: string, enum: [USD] }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        alert_thresholds: { type: array, items: { type: integer, minimum: 1, maximum: 100 }, maxItems: 5 }
+        hard_stop: { type: boolean }
+    UsageTotals:
+      type: object
+      required: [provider_reported, calculated, estimated, total, count]
+      properties:
+        provider_reported: { type: number }
+        calculated: { type: number }
+        estimated: { type: number }
+        total: { type: number }
+        count: { type: integer }
+    UsageSummaryRow:
+      allOf:
+        - { $ref: "#/components/schemas/UsageTotals" }
+        - type: object
+          required: [key, label]
+          properties:
+            key: { type: [string, "null"], description: "Group key (date, id or code); null = none (e.g. no campaign)" }
+            label: { type: string }
+    UsageSummary:
+      type: object
+      required: [from, to, group_by, currency, rows, totals]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        group_by: { type: string, enum: [day, campaign, provider, model, user, job_type] }
+        currency: { type: string, example: USD }
+        rows: { type: array, items: { $ref: "#/components/schemas/UsageSummaryRow" } }
+        totals: { $ref: "#/components/schemas/UsageTotals" }
