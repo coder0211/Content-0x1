@@ -73,11 +73,12 @@ describe("ReviewQueuePage (ACS-081)", () => {
 
     server.use(rest.get(api("/reviews/queue"), () => fail(500, "INTERNAL", "boom")));
     const second = renderApp("/review");
-    expect(await screen.findByText("Không tải được dữ liệu.")).toBeInTheDocument();
+    // 5xx is retried twice with backoff before the error state shows.
+    expect(await screen.findByText("Không tải được dữ liệu.", undefined, { timeout: 6000 })).toBeInTheDocument();
     second.unmount();
 
     mockSession.signInAs("creator@acs.local");
     renderApp("/review");
     expect(await screen.findByText("Bạn không có quyền xem mục này. Liên hệ Admin.")).toBeInTheDocument();
-  });
+  }, 15_000);
 });

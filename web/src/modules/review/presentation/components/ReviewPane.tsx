@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ExternalLink } from "lucide-react";
 import { formatDateTime, formatRelative } from "@/shared/lib/format";
 import { ASSET_TYPE_LABELS, AssetVersionContent, useAsset, useAssetVersions, versionText, type Approval } from "@/modules/library";
-import { Button } from "@/shared/ui/button";
+import { Button, buttonVariants } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { ErrorState, StatusBadge } from "@/shared/ui/patterns";
 import { DecisionForm } from "./DecisionForm";
@@ -51,12 +51,10 @@ export function ReviewPane({ assetId, onDecided }: { assetId: string; onDecided:
             {a.submittedAt ? ` · gửi ${formatRelative(a.submittedAt)}` : ""}
           </p>
         </div>
-        <Button asChild variant="ghost" size="sm">
-          <Link to={`/library/${a.id}`}>
+        <Link to={`/library/${a.id}`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
             <ExternalLink />
             Mở chi tiết
           </Link>
-        </Button>
       </header>
 
       {canDiff ? (

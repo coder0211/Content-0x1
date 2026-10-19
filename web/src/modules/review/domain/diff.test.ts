@@ -11,6 +11,11 @@ describe("diffWords", () => {
     expect(segs[0]).toEqual({ kind: "same", text: "Bánh kem trà xanh mềm mịn, " });
   });
 
+  it("folds whitespace gaps so one edit is one inserted segment", () => {
+    const segs = diffWords("ít ngọt.", "ít ngọt, giao tận nhà.");
+    expect(segs.filter((s) => s.kind === "added")).toEqual([{ kind: "added", text: "ngọt, giao tận nhà." }]);
+  });
+
   it("reports identical text as one unchanged segment", () => {
     expect(diffWords("a b", "a b")).toEqual([{ kind: "same", text: "a b" }]);
   });

@@ -55,6 +55,41 @@ export function diffWords(before: string, after: string): DiffSegment[] {
   }
   while (i < a.length) push("removed", a[i++]!);
   while (j < b.length) push("added", b[j++]!);
+  return coalesce(out);
+}
+
+/**
+ * Whitespace-only "same" segments between changes split one edit into many tiny ones
+ * ("giao" + " " + "tận" …). Fold such runs into one removed + one added segment.
+ */
+function coalesce(segs: DiffSegment[]): DiffSegment[] {
+  const out: DiffSegment[] = [];
+  let k = 0;
+  while (k < segs.length) {
+    const s = segs[k]!;
+    if (s.kind === "same") {
+      out.push(s);
+      k++;
+      continue;
+    }
+    let removed = "";
+    let added = "";
+    let end = k;
+    // Extend the run over changes and whitespace-only "same" gaps followed by another change.
+    while (end < segs.length) {
+      const cur = segs[end]!;
+      if (cur.kind === "removed") removed += cur.text;
+      else if (cur.kind === "added") added += cur.text;
+      else if (/^\s+$/.test(cur.text) && segs[end + 1] && segs[end + 1]!.kind !== "same") {
+        removed += cur.text;
+        added += cur.text;
+      } else break;
+      end++;
+    }
+    if (removed) out.push({ kind: "removed", text: removed });
+    if (added) out.push({ kind: "added", text: added });
+    k = end;
+  }
   return out;
 }
 
