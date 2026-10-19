@@ -1,0 +1,306 @@
+# Fragment owned by module job (SPEC-04 §2.7, §3).
+paths:
+  /jobs:
+    get:
+      tags: [jobs]
+      operationId: listJobs
+      summary: Jobs, newest first (own jobs; all jobs with provider.view)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: status
+          in: query
+          description: Comma-separated statuses
+          schema: { type: string, example: "queued,running" }
+        - name: type
+          in: query
+          description: Comma-separated job types
+          schema: { type: string, example: content_generation }
+        - { name: campaign_id, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+        - name: created_by
+          in: query
+          description: Ignored without provider.view (forced to the caller)
+          schema: { $ref: "#/components/schemas/UUID" }
+        - { name: provider_code, in: query, schema: { type: string } }
+        - { name: needs_reconciliation, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/JobSummary" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /jobs/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [jobs]
+      operationId: getJob
+      summary: Job with steps, progress, result and error (owner or provider.view). Poll every 3s when SSE fails.
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/JobDetail" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /jobs/{id}/events:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [jobs]
+      operationId: streamJobEvents
+      summary: >-
+        SSE stream (text/event-stream). Events `status`, `progress`, `step`, `done`; the first event is
+        the current `status` snapshot; the stream ends after `done`. `: ping` every 15s.
+      responses:
+        "200":
+          description: "Event stream; each `data:` line is JSON (JobStreamStatus, JobStreamStep or JobStreamDone)"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /jobs/{id}/history:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [jobs]
+      operationId: listJobHistory
+      summary: Append-only ai_job_events log of a job (oldest first, newest `limit` rows)
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 200 } }
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/JobHistoryEvent" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /jobs/{id}/cancel:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [jobs]
+      operationId: cancelJob
+      summary: >-
+        Request cancellation (owner or admin). Jobs with nothing in flight are cancelled at once; otherwise
+        the worker cancels after the running step (provider.Cancel for waiting video steps). Finished → 409.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "202":
+          description: Cancellation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [job_id, status, cancel_requested]
+                    properties:
+                      job_id: { $ref: "#/components/schemas/UUID" }
+                      status: { $ref: "#/components/schemas/JobStatus" }
+                      cancel_requested: { type: boolean }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /jobs/{id}/retry:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [jobs]
+      operationId: retryJob
+      summary: >-
+        Re-run the failed steps of a failed job (owner or admin; succeeded steps keep their output). Only
+        retryable errors unless an admin sends force=true. Creates a new budget reservation (429 when over budget).
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                force: { type: boolean, default: false }
+      responses:
+        "202":
+          description: Job re-queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { $ref: "#/components/schemas/JobAccepted" }
+                  meta: { $ref: "#/components/schemas/Meta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+components:
+  schemas:
+    JobStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, cancelled]
+    JobStepStatus:
+      type: string
+      enum: [pending, queued, running, waiting_provider, succeeded, failed, cancelled, skipped]
+    JobType:
+      type: string
+      enum:
+        - content_generation
+        - content_rewrite
+        - content_transform
+        - content_plan
+        - image_generation
+        - image_edit
+        - image_prompt_suggest
+        - video_storyboard
+        - video_production
+        - video_scene_regenerate
+        - video_render
+    JobCost:
+      type: object
+      required: [estimate, actual, source, currency]
+      properties:
+        estimate: { type: [number, "null"] }
+        actual: { type: [number, "null"] }
+        source: { type: [string, "null"], enum: [provider_reported, calculated, estimated, null] }
+        currency: { type: string, example: USD }
+    JobError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: PROVIDER_CONTENT_POLICY }
+        message: { type: string, description: Vietnamese, user-facing }
+    JobSummary:
+      type: object
+      required:
+        - id
+        - job_type
+        - status
+        - progress
+        - created_by
+        - campaign_id
+        - asset_id
+        - provider_code
+        - model_code
+        - cost
+        - error
+        - cancel_requested
+        - needs_reconciliation
+        - created_at
+        - started_at
+        - finished_at
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        job_type: { $ref: "#/components/schemas/JobType" }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        created_by: { $ref: "#/components/schemas/UUID" }
+        campaign_id: { type: [string, "null"], format: uuid }
+        asset_id: { type: [string, "null"], format: uuid }
+        provider_code: { type: [string, "null"] }
+        model_code: { type: [string, "null"] }
+        cost: { $ref: "#/components/schemas/JobCost" }
+        error:
+          oneOf:
+            - { $ref: "#/components/schemas/JobError" }
+            - { type: "null" }
+        cancel_requested: { type: boolean }
+        needs_reconciliation: { type: boolean }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+    JobStep:
+      type: object
+      required: [id, step_key, step_type, status, attempt_count, error_kind, error_message, output, started_at, finished_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        step_key: { type: string, example: "scene_generation:2" }
+        step_type: { type: string, example: scene_generation }
+        status: { $ref: "#/components/schemas/JobStepStatus" }
+        attempt_count: { type: integer }
+        error_kind:
+          type: [string, "null"]
+          description: Transient, RateLimited, InvalidRequest, ContentPolicy, Auth, Unknown, Timeout, Permanent, Domain, Internal, LeaseExpired
+        error_message: { type: [string, "null"], description: Internal detail; only sent to provider.view }
+        output: { description: Step output JSON (null until the step produced one) }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+    JobDetail:
+      allOf:
+        - { $ref: "#/components/schemas/JobSummary" }
+        - type: object
+          required: [brand_version_id, prompt_template_id, request, result, steps]
+          properties:
+            brand_version_id: { type: [string, "null"], format: uuid }
+            prompt_template_id: { type: [string, "null"], format: uuid }
+            request: { type: object, additionalProperties: true }
+            result:
+              description: "e.g. {\"asset_ids\": [...]} once succeeded; null before"
+              type: [object, "null"]
+              additionalProperties: true
+            steps: { type: array, items: { $ref: "#/components/schemas/JobStep" } }
+    JobHistoryEvent:
+      type: object
+      required: [id, step_id, event_type, payload, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        step_id: { type: [string, "null"], format: uuid }
+        event_type:
+          type: string
+          description: created, status_changed, step_status_changed, retry_scheduled, provider_error, cancel_requested, retried, lease_expired, concurrency_wait, reconciled
+        payload: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    JobStreamStatus:
+      description: "SSE `status` / `progress` data"
+      type: object
+      required: [job_id, status, progress]
+      properties:
+        job_id: { $ref: "#/components/schemas/UUID" }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        progress: { type: integer }
+        cancel_requested: { type: boolean }
+        step_key: { type: string }
+        step_progress: { type: integer }
+        message: { type: string }
+    JobStreamStep:
+      description: "SSE `step` data"
+      type: object
+      required: [job_id, step_key, status, attempt_count]
+      properties:
+        job_id: { $ref: "#/components/schemas/UUID" }
+        step_key: { type: string }
+        status: { $ref: "#/components/schemas/JobStepStatus" }
+        attempt_count: { type: integer }
+        error_kind: { type: string }
+    JobStreamDone:
+      description: "SSE `done` data (last event)"
+      type: object
+      required: [job_id, status, result]
+      properties:
+        job_id: { $ref: "#/components/schemas/UUID" }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        result: { type: [object, "null"], additionalProperties: true }
+        error: { $ref: "#/components/schemas/JobError" }
