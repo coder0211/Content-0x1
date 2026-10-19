@@ -23,7 +23,7 @@ describe("Brand Studio", () => {
 
   it("shows the error state with retry", async () => {
     mockSession.signInAs("lead@acs.local");
-    server.use(rest.get(api("/brands"), () => fail(500, "INTERNAL", "boom")));
+    server.use(rest.get(api("/brands"), () => fail(400, "VALIDATION_FAILED", "boom")));
     renderApp("/brands");
     expect(await screen.findByText("Không tải được dữ liệu.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
