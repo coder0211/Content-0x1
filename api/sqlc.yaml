@@ -61,6 +61,13 @@ sql:
         out: internal/modules/audit/adapter/postgres
   - engine: postgresql
     schema: migrations
+    queries: internal/modules/budget/adapter/postgres/queries.sql
+    gen:
+      go:
+        <<: *gen
+        out: internal/modules/budget/adapter/postgres
+  - engine: postgresql
+    schema: migrations
     queries: internal/modules/file/adapter/postgres/queries.sql
     gen:
       go:
