@@ -48,8 +48,8 @@ func (a *API) addVersion(assetID kernel.ID, v usecase.NewVersion) usecase.AssetR
 	a.Versions[assetID] = append(a.Versions[assetID], vv)
 	as := a.Assets[assetID]
 	as.CurrentVersion = &vv
-	if as.Status == usecase.StatusApproved {
-		as.Status = usecase.StatusDraft
+	if as.Status != usecase.StatusArchived {
+		as.Status = usecase.StatusDraft // any new version must be reviewed again
 	}
 	return usecase.AssetRef{AssetID: assetID, VersionID: vv.ID, VersionNo: no}
 }
@@ -57,8 +57,12 @@ func (a *API) addVersion(assetID kernel.ID, v usecase.NewVersion) usecase.AssetR
 func (a *API) AddVersion(_ context.Context, assetID kernel.ID, v usecase.NewVersion) (usecase.AssetRef, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if _, ok := a.Assets[assetID]; !ok {
+	as, ok := a.Assets[assetID]
+	if !ok {
 		return usecase.AssetRef{}, kernel.ErrNotFound
+	}
+	if as.Status == usecase.StatusArchived {
+		return usecase.AssetRef{}, kernel.InvalidTransition(string(as.Status), "new_version")
 	}
 	return a.addVersion(assetID, v), nil
 }
@@ -111,4 +115,16 @@ func (a *API) CanEdit(_ context.Context, actor kernel.Actor, id kernel.ID) error
 		return kernel.ErrForbidden
 	}
 	return nil
+}
+
+func (a *API) CountByStatus(_ context.Context, createdBy *kernel.ID) (map[usecase.Status]int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := map[usecase.Status]int{}
+	for _, as := range a.Assets {
+		if createdBy == nil || as.CreatedBy == *createdBy {
+			out[as.Status]++
+		}
+	}
+	return out, nil
 }

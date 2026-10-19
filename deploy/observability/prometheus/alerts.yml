@@ -1,0 +1,79 @@
+# Alert rules (ACS-104, SPEC-02 §8):
+#   job failed rate > 20% over 15m, outbox lag > 60s, video queue > 50,
+#   AI spend >= 80% / 100% of the monthly budget.
+#
+# Budget: there is no budget gauge metric. The authoritative check lives in the
+# budget module (budget_settings.global_monthly_limit, 80/100% alerts by e-mail
+# + in-app notification, hard stop). These rules are an independent backstop
+# computed from ai_cost_usd_total over a rolling 30 days. The limit is the
+# recording rule `acs:budget_monthly_limit_usd` — keep it equal to
+# budget_settings.global_monthly_limit (OQ-03: 1000 USD in production; the
+# staging compose mounts the same file, edit the constant for staging's
+# smaller budget). Prometheus retention must be >= 31d (see compose flags).
+groups:
+  - name: acs-recording
+    interval: 1m
+    rules:
+      - record: acs:budget_monthly_limit_usd
+        expr: vector(1000)
+      - record: acs:ai_cost_usd:rolling_30d
+        expr: sum(increase(ai_cost_usd_total[30d])) or vector(0)
+      - record: acs:ai_job_failed_ratio:15m
+        expr: |
+          sum(increase(ai_job_total{status="failed"}[15m]))
+            /
+          clamp_min(sum(increase(ai_job_total{status=~"succeeded|failed|cancelled"}[15m])), 1)
+
+  - name: acs-alerts
+    rules:
+      - alert: AIJobFailedRateHigh
+        expr: acs:ai_job_failed_ratio:15m > 0.20 and on() sum(increase(ai_job_total[15m])) >= 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "AI job failure rate {{ $value | humanizePercentage }} over 15m (> 20%)"
+          runbook: "Check /jobs and provider status; break down ai_provider_errors_total by provider/kind."
+
+      - alert: OutboxLagHigh
+        expr: max(outbox_lag_seconds) > 60
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Outbox lag {{ $value | humanizeDuration }} (> 60s) — job dispatch is stalled"
+          runbook: "Check worker dispatcher logs and Redis connectivity."
+
+      - alert: VideoQueueBacklog
+        expr: max(queue_depth{queue="video"}) > 50
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Video queue depth {{ $value }} (> 50)"
+          runbook: "Scale video workers or check provider rate limits."
+
+      - alert: BudgetSpend80Percent
+        expr: acs:ai_cost_usd:rolling_30d / on() acs:budget_monthly_limit_usd >= 0.80
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "AI spend reached {{ $value | humanizePercentage }} of the monthly budget"
+
+      - alert: BudgetSpend100Percent
+        expr: acs:ai_cost_usd:rolling_30d / on() acs:budget_monthly_limit_usd >= 1.0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "AI spend reached the monthly budget (hard stop must be active)"
+
+      - alert: APIDown
+        expr: up{job="acs-api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "API scrape target is down"
+
+      - alert: APIHighLatencyP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route!~".*/events"}[5m]))) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency {{ $value }}s (> 1s, SSE excluded)"

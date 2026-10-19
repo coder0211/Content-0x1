@@ -1,0 +1,73 @@
+# Fragment owned by module dashboard (ACS-095).
+paths:
+  /dashboard/summary:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardSummary
+      summary: "Dashboard widgets for the current user (auth). A widget the user may not see is `null`: reviews.pending_review needs asset.review, cost needs usage.view; jobs are scoped to the user's own jobs unless provider.view."
+      responses:
+        "200":
+          description: Widgets
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/DashboardSummary" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+components:
+  schemas:
+    DashboardCampaign:
+      type: object
+      required: [id, name, status, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        name: { type: string }
+        status: { type: string, enum: [draft, in_progress, review, completed, archived] }
+        updated_at: { type: string, format: date-time }
+    DashboardJob:
+      type: object
+      required: [id, job_type, status, progress, error_code, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        job_type: { type: string }
+        status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        progress: { type: integer }
+        error_code: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+    DashboardSummary:
+      type: object
+      required: [campaigns, jobs, reviews, cost, generated_at]
+      properties:
+        campaigns:
+          oneOf:
+            - type: object
+              required: [active_count, recent]
+              properties:
+                active_count: { type: integer, description: "Campaigns in_progress or review" }
+                recent: { type: array, items: { $ref: "#/components/schemas/DashboardCampaign" }, description: "5 most recently updated active campaigns" }
+            - type: "null"
+        jobs:
+          type: object
+          required: [scope, queued, running, failed_24h, recent]
+          properties:
+            scope: { type: string, enum: [own, all] }
+            queued: { type: integer }
+            running: { type: integer }
+            failed_24h: { type: integer }
+            recent: { type: array, items: { $ref: "#/components/schemas/DashboardJob" }, description: "Up to 5 running or recently failed jobs" }
+        reviews:
+          type: object
+          required: [pending_review, my_pending_review, my_changes_requested, my_drafts]
+          properties:
+            pending_review: { type: [integer, "null"], description: "Whole queue size (asset.review only)" }
+            my_pending_review: { type: integer }
+            my_changes_requested: { type: integer }
+            my_drafts: { type: integer }
+        cost:
+          oneOf:
+            - type: object
+              required: [currency, today, month, monthly_limit, month_used_pct]
+              properties:
+                currency: { type: string, example: USD }
+                today: { type: number }
+                month: { type: number }
+                monthly_limit: { type: [number, "null"] }
+                month_used_pct: { type: [number, "null"] }
+            - type: "null"
+        generated_at: { type: string, format: date-time }

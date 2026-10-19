@@ -1,0 +1,216 @@
+# Staging stack (ACS-106, OQ-05: VM + Docker Compose behind nginx).
+# Lives on the VM at /opt/acs (DEPLOY_DIR) together with `.env` (copied from
+# .env.example and filled from the secret store) and `certs/` (fullchain.pem +
+# privkey.pem covering both APP_HOST and S3_HOST).
+#
+#   docker compose --env-file .env pull
+#   docker compose --env-file .env run --rm migrate
+#   docker compose --env-file .env up -d
+#   docker compose --env-file .env --profile observability up -d   # prometheus + grafana
+#   docker compose --env-file .env --profile backup run --rm backup  # see deploy/backup
+#
+# Images are built and pushed by .github/workflows/deploy-staging.yml:
+#   ${REGISTRY}/acs-{api,worker,render,web}:${IMAGE_TAG}
+name: acs-staging
+
+x-app-env: &app-env
+  env_file: [.env]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  # MinIO on staging. Production may point S3_* at AWS S3 instead and drop
+  # minio/minio-init (same client, OQ-05). Versioning is enabled on the bucket.
+  minio:
+    image: minio/minio:latest # pin by digest before go-live
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes: [miniodata:/data]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  minio-init:
+    image: minio/mc:latest # pin by digest before go-live
+    depends_on:
+      minio: { condition: service_healthy }
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$S3_BUCKET"
+        mc anonymous set none "local/$$S3_BUCKET"
+        mc version enable "local/$$S3_BUCKET"
+        mc mb --ignore-existing "local/$$BACKUP_S3_BUCKET"
+        mc version enable "local/$$BACKUP_S3_BUCKET"
+        # App user limited to read/write on the asset bucket and the backup bucket.
+        mc admin user add local "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY" || true
+        mc admin policy attach local readwrite --user "$$S3_ACCESS_KEY" || true
+        echo "buckets ready"
+    restart: "no"
+
+  migrate:
+    <<: *app-env
+    image: ${REGISTRY}/acs-api:${IMAGE_TAG}
+    entrypoint: ["/usr/local/bin/acs", "migrate", "up"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app-env
+    image: ${REGISTRY}/acs-api:${IMAGE_TAG}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+      migrate: { condition: service_completed_successfully }
+    expose: ["8080"]
+
+  # AI queues (text, image, video polling, maintenance).
+  worker:
+    <<: *app-env
+    image: ${REGISTRY}/acs-worker:${IMAGE_TAG}
+    command: ["--queues=text,image,video,maintenance"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  # FFmpeg render queue (CPU heavy, isolated limits). Image from
+  # deploy/Dockerfile.render (owned by the video agent); its entrypoint is the worker binary.
+  render:
+    <<: *app-env
+    image: ${REGISTRY}/acs-render:${IMAGE_TAG}
+    command: ["--queues=render"]
+    environment:
+      MEDIA_TEMP_DIR: /var/tmp/acs
+    tmpfs: ["/var/tmp/acs:size=4g,mode=1777"]
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 3g }
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    image: ${REGISTRY}/acs-web:${IMAGE_TAG}
+    restart: unless-stopped
+    expose: ["8080"]
+
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on: [api, web, minio]
+    ports: ["80:80", "443:443"]
+    environment:
+      APP_HOST: ${APP_HOST}
+      S3_HOST: ${S3_HOST}
+      NGINX_ENVSUBST_FILTER: "^(APP_HOST|S3_HOST)$"
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./certs:/etc/nginx/certs:ro
+      - certbot-www:/var/www/certbot:ro
+    networks:
+      default:
+        # Containers resolve the public S3 host to nginx, so the API signs
+        # presigned URLs for the exact host the browser uses (one endpoint, TLS).
+        aliases: ["${S3_HOST}"]
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=45d
+      - --web.enable-lifecycle
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports: ["127.0.0.1:9090:9090"] # SSH tunnel only
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.1.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"] # SSH tunnel only
+
+  # Daily logical backup (ACS-103). Run from host cron:
+  #   15 2 * * * cd /opt/acs/deploy/staging && docker compose --env-file .env --profile backup run --rm backup
+  backup:
+    profiles: [backup]
+    image: postgres:16-alpine
+    env_file: [.env]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_DIR: /backups
+      BACKUP_S3_ALIAS_URL: http://minio:9000
+    entrypoint: ["/bin/sh", "-ec", "apk add --no-cache bash minio-client >/dev/null && exec bash /scripts/pg-backup.sh"]
+    volumes:
+      - ../backup:/scripts:ro
+      - ${BACKUP_HOST_DIR:-/var/backups/acs}:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  promdata:
+  grafanadata:
+  certbot-www:
