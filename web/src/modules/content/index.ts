@@ -1,5 +1,10 @@
 import { PenLine } from "lucide-react";
+import type { RepositoryFactories } from "@/shared/lib/di";
 import { lazyPage, type AppRoute, type NavItem } from "@/shared/lib/module";
+import { HttpContentRepository } from "./infrastructure/HttpContentRepository";
+
+export type { ContentRepository } from "./application/ports";
+export { videoStudioLink } from "./domain/content";
 
 export const routes: AppRoute[] = [
   {
@@ -10,5 +15,16 @@ export const routes: AppRoute[] = [
 ];
 
 export const navItems: NavItem[] = [
-  { to: "/content", label: "Nội dung", icon: PenLine, group: "work", order: 30, permission: "generate.run" },
+  {
+    to: "/content",
+    label: "Nội dung",
+    icon: PenLine,
+    group: "work",
+    order: 30,
+    permission: "generate.run",
+  },
 ];
+
+export const repositories: RepositoryFactories = {
+  content: () => new HttpContentRepository(),
+};

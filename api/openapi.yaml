@@ -135,6 +135,169 @@ paths:
       responses:
         "204": {$ref: "#/components/responses/NoContent"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /content/generations:
+    post:
+      tags: [content]
+      operationId: createContentGeneration
+      summary: Generate N content variants (job content_generation → result.asset_ids)
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentGenerationRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /content/{assetId}/rewrites:
+    post:
+      tags: [content]
+      operationId: createContentRewrite
+      summary: Rewrite a content asset into a new version (job content_rewrite)
+      parameters:
+        - {name: assetId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentRewriteRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /content/{assetId}/transforms:
+    post:
+      tags: [content]
+      operationId: createContentTransform
+      summary: Transform a content asset into a new asset with source_asset_id (job content_transform)
+      parameters:
+        - {name: assetId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentTransformRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /campaigns/{id}/plan-generations:
+    post:
+      tags: [campaigns]
+      operationId: createCampaignPlanGeneration
+      summary: Generate a content plan proposal for a campaign (job content_plan → result.plan)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentPlanRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /images/prompt-suggestions:
+    post:
+      tags: [images]
+      operationId: createImagePromptSuggestions
+      summary: Suggest 3 image prompts using brand colors/tone (job image_prompt_suggest → result.prompts)
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentImagePromptRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
   /files/upload-url:
     post:
       tags: [files]
@@ -517,6 +680,139 @@ components:
         payload: {type: object}
         read_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+    ContentPlatform: {type: string, enum: [facebook, instagram, tiktok, zalo, email]}
+    ContentFormat: {type: string, enum: [facebook_post, tiktok_script, caption, email, video_script]}
+    ContentGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [platform]
+      description: brand_id or campaign_id is required; the campaign brief fills empty brief fields.
+      properties:
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        platform: {$ref: "#/components/schemas/ContentPlatform"}
+        format: {$ref: "#/components/schemas/ContentFormat"}
+        content_type: {type: string, enum: [promotional_post, educational_post, engagement_post, announcement, testimonial], default: promotional_post}
+        objective: {type: string, enum: [awareness, engagement, lead, conversion]}
+        framework: {type: string, enum: ["", AIDA, PAS, Storytelling, SEO]}
+        length: {type: string, enum: [short, medium, long], default: medium}
+        language: {type: string, enum: [vi, en], default: vi}
+        tone: {type: array, maxItems: 5, items: {type: string, maxLength: 40}}
+        brief:
+          type: object
+          additionalProperties: false
+          properties:
+            product_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+            target_audience: {type: string, maxLength: 2000}
+            key_message: {type: string, maxLength: 2000}
+            cta: {type: string, maxLength: 200}
+            notes: {type: string, maxLength: 2000}
+            reference_text: {type: string, maxLength: 8000, description: Reference material; passed to the model only as data.}
+        variants: {type: integer, minimum: 1, maximum: 5, default: 3}
+        model_code: {type: string}
+        budget_override: {type: boolean, description: Lead/Admin only; accept exceeding the per-job limit.}
+    ContentRewriteRequest:
+      type: object
+      additionalProperties: false
+      required: [instruction]
+      properties:
+        instruction: {type: string, enum: [shorten, expand, change_tone, custom]}
+        tone: {type: array, maxItems: 5, items: {type: string}}
+        custom_prompt: {type: string, maxLength: 1000}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentTransformRequest:
+      type: object
+      additionalProperties: false
+      required: [target_type]
+      properties:
+        target_type: {$ref: "#/components/schemas/ContentFormat"}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentPlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        language: {type: string, enum: [vi, en]}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentImagePromptRequest:
+      type: object
+      additionalProperties: false
+      required: [preset]
+      description: One of campaign_id, source_asset_id or brand_id is required.
+      properties:
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        source_asset_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        preset: {type: string, enum: [social_post, poster, product_photo, thumbnail]}
+        description: {type: string, maxLength: 2000}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentWarning:
+      type: object
+      required: [type, text]
+      properties:
+        type: {type: string, enum: [forbidden_word, unverified_claim]}
+        text: {type: string}
+    ContentScene:
+      type: object
+      required: [narration, visual_hint, duration_sec]
+      properties:
+        narration: {type: string}
+        visual_hint: {type: string}
+        duration_sec: {type: integer}
+    ContentVersionContent:
+      type: object
+      description: asset_versions.content_json of a content asset.
+      required: [title, hook, body_html, body_text, cta, hashtags, platform, warnings]
+      properties:
+        title: {type: string}
+        hook: {type: string}
+        body_html: {type: string}
+        body_text: {type: string}
+        cta: {type: string}
+        hashtags: {type: array, items: {type: string}}
+        platform: {type: string}
+        format: {$ref: "#/components/schemas/ContentFormat"}
+        language: {type: string}
+        scenes: {type: array, items: {$ref: "#/components/schemas/ContentScene"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/ContentWarning"}}
+        provenance:
+          type: object
+          properties:
+            job_id: {$ref: "#/components/schemas/UUID"}
+            provider_code: {type: string}
+            model_code: {type: string}
+            prompt_template_code: {type: string}
+            prompt_template_version: {type: integer}
+            prompt_template_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+            brand_version_id: {$ref: "#/components/schemas/UUID"}
+            brand_version_no: {type: integer}
+            product_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+    ContentImagePrompt:
+      type: object
+      description: One item of result.prompts of an image_prompt_suggest job.
+      required: [prompt, negative_prompt, rationale]
+      properties:
+        prompt: {type: string}
+        negative_prompt: {type: string}
+        rationale: {type: string}
+    ContentPlan:
+      type: object
+      description: result.plan of a content_plan job (also stored as the campaign plan proposal).
+      required: [summary, themes, schedule, deliverables]
+      properties:
+        summary: {type: string}
+        themes:
+          type: array
+          items: {type: object, properties: {title: {type: string}, angle: {type: string}, key_message: {type: string}}}
+        schedule:
+          type: array
+          items: {type: object, properties: {date: {type: string}, channel: {type: string}, format: {type: string}, theme: {type: string}, idea: {type: string}}}
+        deliverables:
+          type: array
+          items: {type: object, properties: {format: {type: string}, count: {type: integer}, notes: {type: string}}}
     UploadPurpose:
       type: string
       enum: [brand_logo, reference_image, image_mask, video_source, music, document]
