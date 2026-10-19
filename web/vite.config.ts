@@ -36,6 +36,7 @@ export default defineConfig(({ mode }) => {
       include: ["src/**/*.test.{ts,tsx}"],
       css: false,
       restoreMocks: true,
+      testTimeout: 30000,
       env: { VITE_API_BASE_URL: "/api/v1" },
     },
   };

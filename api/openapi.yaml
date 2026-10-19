@@ -80,6 +80,213 @@ paths:
           description: Prometheus text format
           content:
             text/plain: {schema: {type: string}}
+  /assets:
+    get:
+      tags: [asset]
+      operationId: listAssets
+      summary: Library search (brand.view). Full-text `q` (unaccent, prefix) + filters; newest first.
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+        - {name: type, in: query, schema: {$ref: "#/components/schemas/AssetType"}}
+        - {name: status, in: query, description: "One status or a comma-separated list", schema: {type: string, example: "draft,pending_review"}}
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: brand_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: created_by, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: tag, in: query, schema: {type: string}}
+        - {name: from, in: query, description: "created_at >= from (RFC3339 or YYYY-MM-DD)", schema: {type: string}}
+        - {name: to, in: query, description: "created_at < to (RFC3339) or end of day (YYYY-MM-DD)", schema: {type: string}}
+      responses:
+        "200":
+          description: Page of assets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AssetSummary"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /assets/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [asset]
+      operationId: getAsset
+      summary: Asset detail with current version, provenance and review history (brand.view)
+      responses:
+        "200":
+          description: Asset
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDetail"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [asset]
+      operationId: updateAsset
+      summary: Update title, tags, usage rights (owner, campaign member, Lead/Admin)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetUpdateRequest"}}}
+      responses:
+        "200":
+          description: Updated asset
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDetail"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      tags: [asset]
+      operationId: deleteAsset
+      summary: Soft delete (owner, campaign member, Lead/Admin); audited
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "204": {$ref: "#/components/responses/NoContent"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /assets/{id}/versions:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [asset]
+      operationId: listAssetVersions
+      summary: All versions, newest first (brand.view)
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AssetVersion"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [asset]
+      operationId: createAssetVersion
+      summary: Manual revision. `base_version_no` must equal the current version → else 409 VERSION_CONFLICT. An approved / pending / changes-requested asset goes back to draft.
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetVersionCreateRequest"}}}
+      responses:
+        "201":
+          description: New current version
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetVersion"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /assets/{id}/versions/{versionNo}/restore:
+    parameters:
+      - {$ref: "#/components/parameters/PathID"}
+      - {name: versionNo, in: path, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      tags: [asset]
+      operationId: restoreAssetVersion
+      summary: Creates version N+1 with the content and files of `versionNo` (owner, campaign member, Lead/Admin)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "201":
+          description: New current version
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetVersion"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /assets/{id}/submit-review:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [review]
+      operationId: submitAssetReview
+      summary: "draft → pending_review (owner, campaign member, Lead/Admin). Posters require checklist.typography_checked=true. Notifies reviewers."
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetSubmitReviewRequest"}}}
+      responses:
+        "200":
+          description: Asset in pending_review
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDetail"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /assets/{id}/approve:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [review]
+      operationId: approveAsset
+      summary: "pending_review → approved (asset.review). The creator cannot approve their own asset unless Admin → 403 SELF_APPROVAL_NOT_ALLOWED. Notifies the creator."
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetReviewDecisionRequest"}}}
+      responses:
+        "200":
+          description: Approved asset
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDetail"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /assets/{id}/request-changes:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [review]
+      operationId: requestAssetChanges
+      summary: "pending_review → changes_requested (asset.review); comment required. Notifies the creator."
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetReviewDecisionRequest"}}}
+      responses:
+        "200":
+          description: Asset in changes_requested
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDetail"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /reviews/queue:
+    get:
+      tags: [review]
+      operationId: listReviewQueue
+      summary: Assets in pending_review, oldest submission first (asset.review)
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: type, in: query, schema: {$ref: "#/components/schemas/AssetType"}}
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "200":
+          description: Review queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AssetSummary"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /assets/{id}/download-url:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [asset]
+      operationId: createAssetDownloadUrl
+      summary: "Signed download URL (asset.download, TTL ≤ 15 min). Creator/Reviewer: only approved assets (else 403). Lead/Admin: any status and any version's file. Every call is audited (asset.download)."
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: "#/components/schemas/AssetDownloadRequest"}}}
+      responses:
+        "200":
+          description: Signed URL
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/AssetDownloadURL"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /audit-logs:
     get:
       tags: [audit]
@@ -134,6 +341,264 @@ paths:
       parameters: [{$ref: "#/components/parameters/CSRFToken"}]
       responses:
         "204": {$ref: "#/components/responses/NoContent"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /brands:
+    get:
+      tags: [brands]
+      operationId: listBrands
+      summary: List brands (brand.view)
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: q, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Brands with their current version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/Brand"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [brands]
+      operationId: createBrand
+      summary: Create a brand and its version 1 (brand.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: {type: string, maxLength: 200}
+                profile: {$ref: "#/components/schemas/BrandProfile"}
+      responses:
+        "201": {$ref: "#/components/responses/BrandResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /brands/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [brands]
+      operationId: getBrand
+      summary: Brand with current_version (brand.view)
+      responses:
+        "200": {$ref: "#/components/responses/BrandResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [brands]
+      operationId: updateBrand
+      summary: Rename and/or save a new profile version (brand.manage)
+      description: >-
+        A changed profile creates a new brand_versions row. `expected_version_no` must equal the current version number, otherwise 409 VERSION_CONFLICT (optimistic lock).
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version_no]
+              properties:
+                name: {type: string, maxLength: 200}
+                profile: {$ref: "#/components/schemas/BrandProfile"}
+                expected_version_no: {type: integer, minimum: 1}
+      responses:
+        "200": {$ref: "#/components/responses/BrandResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [brands]
+      operationId: deleteBrand
+      summary: Soft-delete a brand (brand.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "204": {$ref: "#/components/responses/NoContent"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /brands/{id}/versions:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [brands]
+      operationId: listBrandVersions
+      summary: Version history, newest first (brand.view)
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/BrandVersion"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /brands/{id}/assets:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [brands]
+      operationId: listBrandAssets
+      summary: Logo, reference images, documents and music (brand.view)
+      parameters:
+        - name: asset_type
+          in: query
+          description: Comma-separated asset types.
+          schema: {type: string}
+      responses:
+        "200":
+          description: Brand assets with short-lived signed URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/BrandAsset"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [brands]
+      operationId: addBrandAsset
+      summary: Attach an uploaded (ready) file to the brand (brand.manage)
+      description: Music requires `license` with `source` and `license_type` (OQ-04).
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, asset_type]
+              properties:
+                file_id: {$ref: "#/components/schemas/UUID"}
+                asset_type: {$ref: "#/components/schemas/BrandAssetType"}
+                label: {type: string, maxLength: 300}
+                license: {$ref: "#/components/schemas/BrandMusicLicense"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/BrandAsset"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+  /brands/{id}/assets/{brandAssetId}:
+    parameters:
+      - {$ref: "#/components/parameters/PathID"}
+      - {name: brandAssetId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      tags: [brands]
+      operationId: deleteBrandAsset
+      summary: Detach an asset (brand.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "204": {$ref: "#/components/responses/NoContent"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /brands/{id}/products:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [brands]
+      operationId: listProducts
+      summary: Products of a brand (brand.view)
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: status, in: query, schema: {type: string, enum: [active, archived]}}
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/Product"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [brands]
+      operationId: createProduct
+      summary: Create a product (brand.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProductInput"}
+      responses:
+        "201": {$ref: "#/components/responses/ProductResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /products/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [brands]
+      operationId: getProduct
+      summary: One product (brand.view)
+      responses:
+        "200": {$ref: "#/components/responses/ProductResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [brands]
+      operationId: updateProduct
+      summary: Edit a product; omitted fields are unchanged (brand.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ProductInput"}
+      responses:
+        "200": {$ref: "#/components/responses/ProductResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
   /cost-estimates:
     post:
@@ -267,6 +732,327 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /campaigns:
+    get:
+      tags: [campaigns]
+      operationId: listCampaigns
+      summary: List campaigns (brand.view)
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: brand_id, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/CampaignStatus"}}
+        - {name: q, in: query, schema: {type: string}}
+        - {name: mine, in: query, description: Only campaigns created by or assigned to me., schema: {type: boolean}}
+      responses:
+        "200":
+          description: Campaigns
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/Campaign"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [campaigns]
+      operationId: createCampaign
+      summary: Create a draft campaign (campaign.manage)
+      description: >-
+        Missing brief fields → 400 VALIDATION_FAILED with one detail per field. The campaign budget is set separately with PUT /campaigns/{id}/budget (budget.manage).
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [brand_id, name, goal, brief]
+              properties:
+                brand_id: {$ref: "#/components/schemas/UUID"}
+                name: {type: string, maxLength: 200}
+                goal: {$ref: "#/components/schemas/CampaignGoal"}
+                brief: {$ref: "#/components/schemas/CampaignBrief"}
+                start_date: {type: [string, "null"], format: date}
+                end_date: {type: [string, "null"], format: date}
+                member_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "201": {$ref: "#/components/responses/CampaignResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /campaigns/member-candidates:
+    get:
+      tags: [campaigns]
+      operationId: listCampaignMemberCandidates
+      summary: Active users who can generate content, for the member picker (campaign.manage)
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/CampaignMember"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /campaigns/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [campaigns]
+      operationId: getCampaign
+      summary: Campaign with brief, members and content plan (brand.view)
+      responses:
+        "200": {$ref: "#/components/responses/CampaignResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [campaigns]
+      operationId: updateCampaign
+      summary: Edit brief/header, change status, replace members (campaign.manage)
+      description: >-
+        Creators may edit only campaigns they created or are members of (403 otherwise); members are changed by the creator or Marketing Lead/Admin. Status follows SPEC-03 §2 (draft → in_progress ↔ review → completed → archived, any → archived); an invalid transition (e.g. draft → completed) or editing an archived campaign → 409 INVALID_STATE_TRANSITION.
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                name: {type: string, maxLength: 200}
+                goal: {$ref: "#/components/schemas/CampaignGoal"}
+                brief: {$ref: "#/components/schemas/CampaignBrief"}
+                start_date: {type: string, description: YYYY-MM-DD or empty to clear}
+                end_date: {type: string, description: YYYY-MM-DD or empty to clear}
+                status: {$ref: "#/components/schemas/CampaignStatus"}
+                member_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "200": {$ref: "#/components/responses/CampaignResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /campaigns/{id}/plan:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    put:
+      tags: [campaigns]
+      operationId: saveCampaignPlan
+      summary: Approve (and optionally edit) the content plan → campaigns.content_plan (campaign.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [plan]
+              properties:
+                plan: {$ref: "#/components/schemas/CampaignContentPlan"}
+      responses:
+        "200": {$ref: "#/components/responses/CampaignResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /campaigns/{id}/plan-proposal:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    delete:
+      tags: [campaigns]
+      operationId: discardCampaignPlanProposal
+      summary: Discard the pending AI plan proposal (campaign.manage)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "204": {$ref: "#/components/responses/NoContent"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /content/generations:
+    post:
+      tags: [content]
+      operationId: createContentGeneration
+      summary: Generate N content variants (job content_generation → result.asset_ids)
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentGenerationRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /content/{assetId}/rewrites:
+    post:
+      tags: [content]
+      operationId: createContentRewrite
+      summary: Rewrite a content asset into a new version (job content_rewrite)
+      parameters:
+        - {name: assetId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentRewriteRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /content/{assetId}/transforms:
+    post:
+      tags: [content]
+      operationId: createContentTransform
+      summary: Transform a content asset into a new asset with source_asset_id (job content_transform)
+      parameters:
+        - {name: assetId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentTransformRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /campaigns/{id}/plan-generations:
+    post:
+      tags: [campaigns]
+      operationId: createCampaignPlanGeneration
+      summary: Generate a content plan proposal for a campaign (job content_plan → result.plan)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentPlanRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /images/prompt-suggestions:
+    post:
+      tags: [images]
+      operationId: createImagePromptSuggestions
+      summary: Suggest 3 image prompts using brand colors/tone (job image_prompt_suggest → result.prompts)
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+        - {$ref: "#/components/parameters/CSRFToken"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ContentImagePromptRequest"}
+      responses:
+        "202":
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/JobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+        "503": {$ref: "#/components/responses/ServiceUnavailable"}
+  /dashboard/summary:
+    get:
+      tags: [dashboard]
+      operationId: getDashboardSummary
+      summary: "Dashboard widgets for the current user (auth). A widget the user may not see is `null`: reviews.pending_review needs asset.review, cost needs usage.view; jobs are scoped to the user's own jobs unless provider.view."
+      responses:
+        "200":
+          description: Widgets
+          content: {application/json: {schema: {type: object, required: [data, meta], properties: {data: {$ref: "#/components/schemas/DashboardSummary"}, meta: {$ref: "#/components/schemas/Meta"}}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
   /files/upload-url:
     post:
       tags: [files]
@@ -517,6 +1303,177 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /images/estimate:
+    post:
+      tags: [images]
+      operationId: estimateImages
+      summary: Price an image request without creating a job (CostChip + over-budget banner)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+                operation: {type: string, enum: [generate, edit, variation], default: generate}
+                aspect_ratio: {$ref: "#/components/schemas/ImageAspectRatio"}
+                quality: {$ref: "#/components/schemas/ImageQuality"}
+                count: {type: integer, minimum: 1, maximum: 4, default: 1}
+                model_code: {type: [string, "null"]}
+      responses:
+        "200":
+          description: Estimate with remaining limits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/ImageEstimate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+  /images/generations:
+    get:
+      tags: [images]
+      operationId: listImageBatches
+      summary: Gallery grouped by request, newest first (own batches; a campaign's batches; or one asset's history)
+      parameters:
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: asset_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: Batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/ImageBatch"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [images]
+      operationId: generateImages
+      summary: Prompt-to-image / image-to-image job (FR-IMG-01, 02) → 1 image asset with `count` files
+      description: |
+        Validates reference access (other campaign's file without membership → 404), MIME (png/jpeg/webp,
+        else 415) and model capabilities (unsupported option → 422 CAPABILITY_NOT_SUPPORTED with
+        `details: [{"field":"aspect_ratio","supported":[...]}]`; options are never changed silently).
+        Then estimate → job + budget reservation → 202.
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ImageGenerationRequest"}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /images/references:
+    get:
+      tags: [images]
+      operationId: listImageReferences
+      summary: Reference candidates — brand logo/reference images and recent generated images (signed URLs ≤ 15 min)
+      parameters:
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: brand_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/ImageReference"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /images/{assetId}/edits:
+    parameters:
+      - {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/UUID"}}
+    post:
+      tags: [images]
+      operationId: editImage
+      summary: Edit one image of the asset by prompt → new version (FR-IMG-04)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, prompt]
+              properties:
+                file_id: {$ref: "#/components/schemas/UUID"}
+                prompt: {type: string, maxLength: 4000}
+                mask_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+                quality: {$ref: "#/components/schemas/ImageQuality"}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /images/{assetId}/variations:
+    parameters:
+      - {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/UUID"}}
+    post:
+      tags: [images]
+      operationId: varyImage
+      summary: N variations of one image → new version; files carry parent_file_id (FR-IMG-04)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, count]
+              properties:
+                file_id: {$ref: "#/components/schemas/UUID"}
+                count: {type: integer, minimum: 1, maximum: 4}
+                prompt: {type: string, maxLength: 4000, description: Defaults to the version prompt}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
   /jobs:
     get:
       tags: [jobs]
@@ -671,6 +1628,337 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "429": {$ref: "#/components/responses/TooManyRequests"}
+  /settings/providers:
+    get:
+      tags: [settings]
+      operationId: listProviders
+      summary: List AI providers (provider.view)
+      responses:
+        "200":
+          description: Providers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AIProvider"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /settings/providers/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    patch:
+      tags: [settings]
+      operationId: updateProvider
+      summary: Enable/disable a provider, change secret_ref or config_json (provider.manage; audited; applied to the live registry)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                status: {$ref: "#/components/schemas/AIProviderStatus"}
+                secret_ref: {type: string, description: "Env var name holding the key, or 'none'", example: ANTHROPIC_API_KEY}
+                config_json: {type: object, additionalProperties: true}
+      responses:
+        "200":
+          description: Updated provider
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/AIProvider"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /settings/models:
+    get:
+      tags: [settings]
+      operationId: listModels
+      summary: List AI models with capabilities (provider.view)
+      parameters:
+        - {name: kind, in: query, schema: {$ref: "#/components/schemas/AIKind"}}
+      responses:
+        "200":
+          description: Models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AIModel"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [settings]
+      operationId: createModel
+      summary: Add a model to a provider (provider.manage; audited)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [provider_id, model_code, kind]
+              properties:
+                provider_id: {$ref: "#/components/schemas/UUID"}
+                model_code: {type: string, maxLength: 100}
+                kind: {$ref: "#/components/schemas/AIKind"}
+                capabilities: {$ref: "#/components/schemas/AICapabilities"}
+                concurrency_limit: {type: integer, minimum: 1}
+                is_default: {type: boolean}
+                status: {$ref: "#/components/schemas/AIModelStatus"}
+      responses:
+        "201":
+          description: Created model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/AIModel"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /settings/models/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [settings]
+      operationId: getModel
+      summary: Get a model (provider.view)
+      responses:
+        "200":
+          description: Model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/AIModel"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [settings]
+      operationId: updateModel
+      summary: Update capabilities, concurrency, default flag or status (provider.manage; audited)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                capabilities: {$ref: "#/components/schemas/AICapabilities"}
+                concurrency_limit: {type: integer, minimum: 1}
+                is_default: {type: boolean}
+                status: {$ref: "#/components/schemas/AIModelStatus"}
+      responses:
+        "200":
+          description: Updated model
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/AIModel"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /settings/models/{id}/pricing:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [settings]
+      operationId: listModelPricing
+      summary: Pricing versions of a model, newest first (provider.view)
+      responses:
+        "200":
+          description: Pricing versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/AIPricingVersion"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [settings]
+      operationId: addModelPricing
+      summary: Add an immutable pricing version; closes the current one at effective_from (provider.manage; audited)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pricing_version, currency, items]
+              properties:
+                pricing_version: {type: string, maxLength: 50}
+                currency: {type: string, example: USD}
+                effective_from: {type: string, format: date-time, description: "Defaults to now; must not be in the past"}
+                items: {type: array, minItems: 1, items: {$ref: "#/components/schemas/AIPriceItem"}}
+      responses:
+        "201":
+          description: Created pricing version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/AIPricingVersion"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /settings/prompt-templates:
+    get:
+      tags: [settings]
+      operationId: listPromptTemplates
+      summary: List prompt template versions, optionally of one code
+      parameters:
+        - {name: code, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/PromptTemplate"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [settings]
+      operationId: createPromptTemplateVersion
+      summary: Create the next version of a template code (Lead/Admin; audited); optionally activate it
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code, system_prompt, user_template]
+              properties:
+                code: {type: string, maxLength: 100}
+                system_prompt: {type: string}
+                user_template: {type: string}
+                output_schema: {type: [object, "null"], additionalProperties: true}
+                activate: {type: boolean}
+      responses:
+        "201":
+          description: Created version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/PromptTemplate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /settings/prompt-templates/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [settings]
+      operationId: getPromptTemplate
+      summary: Get a template version
+      responses:
+        "200":
+          description: Template
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/PromptTemplate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /settings/prompt-templates/{id}/activate:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [settings]
+      operationId: activatePromptTemplate
+      summary: Make this version the active one of its code (previous active → retired; Lead/Admin; audited)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "200":
+          description: Activated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/PromptTemplate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /settings/prompt-templates/{id}/retire:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [settings]
+      operationId: retirePromptTemplate
+      summary: Retire a version (Lead/Admin; audited)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "200":
+          description: Retired
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/PromptTemplate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
 components:
   securitySchemes:
     cookieAuth:
@@ -779,6 +2067,141 @@ components:
         job_id: {$ref: "#/components/schemas/UUID"}
         status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
         estimated_cost: {$ref: "#/components/schemas/Money"}
+    AssetType: {type: string, enum: [content, image, video]}
+    AssetStatus: {type: string, enum: [draft, pending_review, changes_requested, approved, archived]}
+    AssetFileRole: {type: string, enum: [primary, variant, thumbnail, subtitle, audio, preview]}
+    AssetVersionFile:
+      type: object
+      required: [file_id, role, sort_order, mime_type, kind, url]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        role: {$ref: "#/components/schemas/AssetFileRole"}
+        sort_order: {type: integer}
+        mime_type: {type: string}
+        kind: {type: string, enum: [image, video, audio, document, subtitle]}
+        width: {type: [integer, "null"]}
+        height: {type: [integer, "null"]}
+        duration_ms: {type: [integer, "null"]}
+        url: {type: [string, "null"], description: "Inline preview URL (≤ 15 min). Downloads go through /assets/{id}/download-url."}
+    AssetProvenance:
+      type: object
+      required: [job_id, job_type, provider_code, model_code, prompt_template_code, prompt_template_version, brand_version_id, brand_version_no]
+      properties:
+        job_id: {$ref: "#/components/schemas/UUID"}
+        job_type: {type: string}
+        provider_code: {type: [string, "null"]}
+        model_code: {type: [string, "null"]}
+        prompt_template_code: {type: [string, "null"]}
+        prompt_template_version: {type: [integer, "null"]}
+        brand_version_id: {type: [string, "null"], format: uuid}
+        brand_version_no: {type: [integer, "null"]}
+    AssetVersion:
+      type: object
+      required: [id, version_no, content_json, change_note, generated_by_job_id, created_by, created_by_name, created_at, files, provenance]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        version_no: {type: integer}
+        content_json: {type: object, description: "Per-type schema (migration 0006): content {title, hook, body_html, body_text, cta, hashtags[], platform, warnings[]}; image {prompt, preset, aspect_ratio, file_ids[]}; video {prompt, preset, aspect_ratio, script, scene_ids[], final_file_id, subtitle_file_id}"}
+        change_note: {type: [string, "null"]}
+        generated_by_job_id: {type: [string, "null"], format: uuid}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        created_by_name: {type: string}
+        created_at: {type: string, format: date-time}
+        files: {type: array, items: {$ref: "#/components/schemas/AssetVersionFile"}}
+        provenance: {oneOf: [{$ref: "#/components/schemas/AssetProvenance"}, {type: "null"}]}
+    AssetSummary:
+      type: object
+      required: [id, campaign_id, brand_id, type, subtype, title, status, tags, usage_rights, source_asset_id, created_by, created_by_name, current_version_no, thumbnail_url, submitted_at, created_at, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        campaign_id: {type: [string, "null"], format: uuid}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        type: {$ref: "#/components/schemas/AssetType"}
+        subtype: {type: [string, "null"], example: facebook_post}
+        title: {type: string}
+        status: {$ref: "#/components/schemas/AssetStatus"}
+        tags: {type: array, items: {type: string}}
+        usage_rights: {type: [string, "null"], description: "Usage-rights note (music source, reference image licence), FR-AST-06"}
+        source_asset_id: {type: [string, "null"], format: uuid}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        created_by_name: {type: string}
+        current_version_no: {type: integer}
+        thumbnail_url: {type: [string, "null"], description: "Inline preview of the current version's thumbnail/primary image (image/video only)"}
+        submitted_at: {type: [string, "null"], format: date-time, description: "Latest submit-review time"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AssetApproval:
+      type: object
+      required: [id, version_id, version_no, reviewer_id, reviewer_name, decision, comment, checklist, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        version_id: {$ref: "#/components/schemas/UUID"}
+        version_no: {type: integer}
+        reviewer_id: {$ref: "#/components/schemas/UUID", description: "Actor of the decision (the submitter for `submitted`)"}
+        reviewer_name: {type: string}
+        decision: {type: string, enum: [submitted, approved, changes_requested]}
+        comment: {type: [string, "null"]}
+        checklist: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+    AssetDetail:
+      allOf:
+        - {$ref: "#/components/schemas/AssetSummary"}
+        - type: object
+          required: [current_version, approvals, permissions]
+          properties:
+            current_version: {$ref: "#/components/schemas/AssetVersion"}
+            approvals: {type: array, items: {$ref: "#/components/schemas/AssetApproval"}, description: "Review history, newest first"}
+            permissions:
+              type: object
+              description: What the current user may do (FE hides actions; the API still enforces).
+              required: [can_edit, can_submit, can_review, can_download]
+              properties:
+                can_edit: {type: boolean}
+                can_submit: {type: boolean}
+                can_review: {type: boolean}
+                can_download: {type: boolean}
+    AssetUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string, minLength: 1, maxLength: 200}
+        tags: {type: array, maxItems: 20, items: {type: string, maxLength: 50}}
+        usage_rights: {type: [string, "null"], maxLength: 2000}
+    AssetVersionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [content_json, base_version_no]
+      properties:
+        content_json: {type: object}
+        change_note: {type: string, maxLength: 500}
+        base_version_no: {type: integer, minimum: 1}
+    AssetSubmitReviewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: {type: string, maxLength: 2000}
+        checklist:
+          type: object
+          additionalProperties: false
+          properties:
+            typography_checked: {type: boolean}
+    AssetReviewDecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: {type: string, maxLength: 2000, description: "Required for request-changes"}
+    AssetDownloadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        file_id: {type: string, format: uuid, description: "Defaults to the current version's primary file"}
+    AssetDownloadURL:
+      type: object
+      required: [url, expires_at, file_id]
+      properties:
+        url: {type: string}
+        expires_at: {type: string, format: date-time}
+        file_id: {$ref: "#/components/schemas/UUID"}
     AuditLog:
       type: object
       required: [id, action, resource_type, resource_id, created_at]
@@ -802,6 +2225,147 @@ components:
         type: {type: string, enum: [job_failed, job_succeeded, review_requested, changes_requested, asset_approved, budget_alert]}
         payload: {type: object}
         read_at: {type: [string, "null"], format: date-time}
+        created_at: {type: string, format: date-time}
+    BrandColor:
+      type: object
+      required: [name, hex]
+      properties:
+        name: {type: string}
+        hex: {type: string, pattern: "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$"}
+    BrandPersona:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        pain_points: {type: array, items: {type: string}}
+        motivations: {type: array, items: {type: string}}
+    BrandProfile:
+      type: object
+      additionalProperties: false
+      properties:
+        description: {type: string}
+        colors: {type: array, maxItems: 20, items: {$ref: "#/components/schemas/BrandColor"}}
+        typography:
+          type: object
+          properties:
+            heading: {type: string}
+            body: {type: string}
+        tone_of_voice: {type: array, items: {type: string}}
+        preferred_words: {type: array, items: {type: string}}
+        forbidden_words: {type: array, items: {type: string}}
+        default_ctas: {type: array, items: {type: string}}
+        audience_personas: {type: array, items: {$ref: "#/components/schemas/BrandPersona"}}
+        notes: {type: string}
+    BrandVersion:
+      type: object
+      required: [id, version_no, profile, created_by, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        version_no: {type: integer}
+        profile: {$ref: "#/components/schemas/BrandProfile"}
+        created_by: {type: [string, "null"], format: uuid}
+        created_at: {type: string, format: date-time}
+    Brand:
+      type: object
+      required: [id, name, current_version, created_by, created_at, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        name: {type: string}
+        current_version: {$ref: "#/components/schemas/BrandVersion"}
+        created_by: {type: [string, "null"], format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ProductOffer:
+      type: object
+      required: [text]
+      properties:
+        text: {type: string}
+        valid_from: {type: [string, "null"], format: date}
+        valid_to: {type: [string, "null"], format: date}
+        status:
+          type: string
+          enum: [active, expired, upcoming]
+          description: Response only. Expired offers are never sent to prompts.
+    ProductProof:
+      type: object
+      required: [text]
+      properties:
+        type: {type: string, enum: [testimonial, statistic, award, certification, media, other]}
+        text: {type: string}
+        source: {type: string}
+        verified: {type: boolean, description: Only verified proof reaches prompts.}
+    ProductFacts:
+      type: object
+      properties:
+        usp: {type: array, items: {type: string}}
+        price:
+          type: [object, "null"]
+          properties:
+            amount: {type: number}
+            currency: {type: string, minLength: 3, maxLength: 3}
+            note: {type: string}
+        offers: {type: array, items: {$ref: "#/components/schemas/ProductOffer"}}
+        policies: {type: array, items: {type: string}}
+        proof: {type: array, items: {$ref: "#/components/schemas/ProductProof"}}
+    ProductInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string, maxLength: 200}
+        description: {type: string}
+        facts: {$ref: "#/components/schemas/ProductFacts"}
+        status: {type: string, enum: [active, archived]}
+    Product:
+      type: object
+      required: [id, brand_id, name, description, facts, status, created_by, created_at, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        name: {type: string}
+        description: {type: string}
+        facts: {$ref: "#/components/schemas/ProductFacts"}
+        status: {type: string, enum: [active, archived]}
+        created_by: {type: [string, "null"], format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BrandAssetType:
+      type: string
+      enum: [logo, reference_image, font, document, sample_content, music]
+    BrandMusicLicense:
+      type: object
+      required: [source, license_type]
+      properties:
+        source: {type: string}
+        license_type: {type: string}
+        expires_at: {type: string, format: date}
+        attribution: {type: string}
+        notes: {type: string}
+    BrandAsset:
+      type: object
+      required: [id, brand_id, file_id, asset_type, label, license, license_valid, file, created_by, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        file_id: {$ref: "#/components/schemas/UUID"}
+        asset_type: {$ref: "#/components/schemas/BrandAssetType"}
+        label: {type: string}
+        license:
+          oneOf:
+            - {$ref: "#/components/schemas/BrandMusicLicense"}
+            - {type: "null"}
+        license_valid: {type: boolean, description: Complete and unexpired license (music usable in videos).}
+        file:
+          type: [object, "null"]
+          properties:
+            mime_type: {type: string}
+            original_name: {type: string}
+            size_bytes: {type: integer}
+            width: {type: integer}
+            height: {type: integer}
+            duration_ms: {type: integer}
+            url: {type: [string, "null"]}
+            url_expires_at: {type: [string, "null"], format: date-time}
+        created_by: {type: [string, "null"], format: uuid}
         created_at: {type: string, format: date-time}
     BudgetEstimateRequest:
       type: object
@@ -944,6 +2508,279 @@ components:
         currency: {type: string, example: USD}
         rows: {type: array, items: {$ref: "#/components/schemas/UsageSummaryRow"}}
         totals: {$ref: "#/components/schemas/UsageTotals"}
+    CampaignStatus:
+      type: string
+      enum: [draft, in_progress, review, completed, archived]
+    CampaignGoal:
+      type: string
+      enum: [awareness, engagement, lead, conversion]
+    CampaignFormat:
+      type: object
+      required: [type, count]
+      properties:
+        type: {type: string, pattern: "^[a-z0-9_]{1,40}$", description: "e.g. facebook_post, poster, short_video"}
+        count: {type: integer, minimum: 1, maximum: 50}
+    CampaignBrief:
+      type: object
+      additionalProperties: false
+      required: [target_audience, key_message, channels, formats, deadline]
+      properties:
+        product_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+        target_audience: {type: string}
+        key_message: {type: string}
+        verified_offer: {type: string}
+        channels: {type: array, minItems: 1, items: {type: string, pattern: "^[a-z0-9_]{1,40}$"}}
+        formats: {type: array, minItems: 1, items: {$ref: "#/components/schemas/CampaignFormat"}}
+        deadline: {type: string, format: date}
+        notes: {type: string}
+    CampaignPlanItem:
+      type: object
+      required: [topic, format]
+      properties:
+        id: {type: string, description: Stable item id (generated as item-N when absent).}
+        topic: {type: string}
+        angle: {type: string}
+        channel: {type: string}
+        format: {type: string}
+        publish_date: {type: string, description: YYYY-MM-DD or empty}
+        notes: {type: string}
+        done: {type: boolean}
+    CampaignContentPlan:
+      type: object
+      required: [items]
+      properties:
+        summary: {type: string}
+        themes: {type: array, items: {type: string}}
+        items: {type: array, minItems: 1, maxItems: 200, items: {$ref: "#/components/schemas/CampaignPlanItem"}}
+    CampaignMember:
+      type: object
+      required: [id, name, email]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        name: {type: string}
+        email: {type: string}
+    Campaign:
+      type: object
+      required: [id, brand_id, name, goal, status, next_statuses, brief, start_date, end_date, content_plan, content_plan_approved_by, content_plan_approved_at, content_plan_proposal, content_plan_proposed_at, member_ids, created_by, created_at, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        name: {type: string}
+        goal: {$ref: "#/components/schemas/CampaignGoal"}
+        status: {$ref: "#/components/schemas/CampaignStatus"}
+        next_statuses: {type: array, items: {$ref: "#/components/schemas/CampaignStatus"}}
+        brief: {$ref: "#/components/schemas/CampaignBrief"}
+        start_date: {type: [string, "null"], format: date}
+        end_date: {type: [string, "null"], format: date}
+        content_plan:
+          description: Approved plan (ACS-037).
+          oneOf:
+            - {$ref: "#/components/schemas/CampaignContentPlan"}
+            - {type: "null"}
+        content_plan_approved_by: {type: [string, "null"], format: uuid}
+        content_plan_approved_at: {type: [string, "null"], format: date-time}
+        content_plan_proposal:
+          description: Latest AI proposal awaiting approval (written by the content_plan job).
+          oneOf:
+            - {$ref: "#/components/schemas/CampaignContentPlan"}
+            - {type: "null"}
+        content_plan_proposed_at: {type: [string, "null"], format: date-time}
+        member_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ContentPlatform: {type: string, enum: [facebook, instagram, tiktok, zalo, email]}
+    ContentFormat: {type: string, enum: [facebook_post, tiktok_script, caption, email, video_script]}
+    ContentGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [platform]
+      description: brand_id or campaign_id is required; the campaign brief fills empty brief fields.
+      properties:
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        platform: {$ref: "#/components/schemas/ContentPlatform"}
+        format: {$ref: "#/components/schemas/ContentFormat"}
+        content_type: {type: string, enum: [promotional_post, educational_post, engagement_post, announcement, testimonial], default: promotional_post}
+        objective: {type: string, enum: [awareness, engagement, lead, conversion]}
+        framework: {type: string, enum: ["", AIDA, PAS, Storytelling, SEO]}
+        length: {type: string, enum: [short, medium, long], default: medium}
+        language: {type: string, enum: [vi, en], default: vi}
+        tone: {type: array, maxItems: 5, items: {type: string, maxLength: 40}}
+        brief:
+          type: object
+          additionalProperties: false
+          properties:
+            product_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+            target_audience: {type: string, maxLength: 2000}
+            key_message: {type: string, maxLength: 2000}
+            cta: {type: string, maxLength: 200}
+            notes: {type: string, maxLength: 2000}
+            reference_text: {type: string, maxLength: 8000, description: Reference material; passed to the model only as data.}
+        variants: {type: integer, minimum: 1, maximum: 5, default: 3}
+        model_code: {type: string}
+        budget_override: {type: boolean, description: Lead/Admin only; accept exceeding the per-job limit.}
+    ContentRewriteRequest:
+      type: object
+      additionalProperties: false
+      required: [instruction]
+      properties:
+        instruction: {type: string, enum: [shorten, expand, change_tone, custom]}
+        tone: {type: array, maxItems: 5, items: {type: string}}
+        custom_prompt: {type: string, maxLength: 1000}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentTransformRequest:
+      type: object
+      additionalProperties: false
+      required: [target_type]
+      properties:
+        target_type: {$ref: "#/components/schemas/ContentFormat"}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentPlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        language: {type: string, enum: [vi, en]}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentImagePromptRequest:
+      type: object
+      additionalProperties: false
+      required: [preset]
+      description: One of campaign_id, source_asset_id or brand_id is required.
+      properties:
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        source_asset_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        preset: {type: string, enum: [social_post, poster, product_photo, thumbnail]}
+        description: {type: string, maxLength: 2000}
+        model_code: {type: string}
+        budget_override: {type: boolean}
+    ContentWarning:
+      type: object
+      required: [type, text]
+      properties:
+        type: {type: string, enum: [forbidden_word, unverified_claim]}
+        text: {type: string}
+    ContentScene:
+      type: object
+      required: [narration, visual_hint, duration_sec]
+      properties:
+        narration: {type: string}
+        visual_hint: {type: string}
+        duration_sec: {type: integer}
+    ContentVersionContent:
+      type: object
+      description: asset_versions.content_json of a content asset.
+      required: [title, hook, body_html, body_text, cta, hashtags, platform, warnings]
+      properties:
+        title: {type: string}
+        hook: {type: string}
+        body_html: {type: string}
+        body_text: {type: string}
+        cta: {type: string}
+        hashtags: {type: array, items: {type: string}}
+        platform: {type: string}
+        format: {$ref: "#/components/schemas/ContentFormat"}
+        language: {type: string}
+        scenes: {type: array, items: {$ref: "#/components/schemas/ContentScene"}}
+        warnings: {type: array, items: {$ref: "#/components/schemas/ContentWarning"}}
+        provenance:
+          type: object
+          properties:
+            job_id: {$ref: "#/components/schemas/UUID"}
+            provider_code: {type: string}
+            model_code: {type: string}
+            prompt_template_code: {type: string}
+            prompt_template_version: {type: integer}
+            prompt_template_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+            brand_version_id: {$ref: "#/components/schemas/UUID"}
+            brand_version_no: {type: integer}
+            product_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+    ContentImagePrompt:
+      type: object
+      description: One item of result.prompts of an image_prompt_suggest job.
+      required: [prompt, negative_prompt, rationale]
+      properties:
+        prompt: {type: string}
+        negative_prompt: {type: string}
+        rationale: {type: string}
+    ContentPlan:
+      type: object
+      description: result.plan of a content_plan job (also stored as the campaign plan proposal).
+      required: [summary, themes, schedule, deliverables]
+      properties:
+        summary: {type: string}
+        themes:
+          type: array
+          items: {type: object, properties: {title: {type: string}, angle: {type: string}, key_message: {type: string}}}
+        schedule:
+          type: array
+          items: {type: object, properties: {date: {type: string}, channel: {type: string}, format: {type: string}, theme: {type: string}, idea: {type: string}}}
+        deliverables:
+          type: array
+          items: {type: object, properties: {format: {type: string}, count: {type: integer}, notes: {type: string}}}
+    DashboardCampaign:
+      type: object
+      required: [id, name, status, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        name: {type: string}
+        status: {type: string, enum: [draft, in_progress, review, completed, archived]}
+        updated_at: {type: string, format: date-time}
+    DashboardJob:
+      type: object
+      required: [id, job_type, status, progress, error_code, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        job_type: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        progress: {type: integer}
+        error_code: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    DashboardSummary:
+      type: object
+      required: [campaigns, jobs, reviews, cost, generated_at]
+      properties:
+        campaigns:
+          oneOf:
+            - type: object
+              required: [active_count, recent]
+              properties:
+                active_count: {type: integer, description: "Campaigns in_progress or review"}
+                recent: {type: array, items: {$ref: "#/components/schemas/DashboardCampaign"}, description: "5 most recently updated active campaigns"}
+            - type: "null"
+        jobs:
+          type: object
+          required: [scope, queued, running, failed_24h, recent]
+          properties:
+            scope: {type: string, enum: [own, all]}
+            queued: {type: integer}
+            running: {type: integer}
+            failed_24h: {type: integer}
+            recent: {type: array, items: {$ref: "#/components/schemas/DashboardJob"}, description: "Up to 5 running or recently failed jobs"}
+        reviews:
+          type: object
+          required: [pending_review, my_pending_review, my_changes_requested, my_drafts]
+          properties:
+            pending_review: {type: [integer, "null"], description: "Whole queue size (asset.review only)"}
+            my_pending_review: {type: integer}
+            my_changes_requested: {type: integer}
+            my_drafts: {type: integer}
+        cost:
+          oneOf:
+            - type: object
+              required: [currency, today, month, monthly_limit, month_used_pct]
+              properties:
+                currency: {type: string, example: USD}
+                today: {type: number}
+                month: {type: number}
+                monthly_limit: {type: [number, "null"]}
+                month_used_pct: {type: [number, "null"]}
+            - type: "null"
+        generated_at: {type: string, format: date-time}
     UploadPurpose:
       type: string
       enum: [brand_logo, reference_image, image_mask, video_source, music, document]
@@ -990,6 +2827,117 @@ components:
         locked_until: {type: [string, "null"], format: date-time}
         last_login_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+    ImageNullableUUID: {type: [string, "null"], format: uuid}
+    ImagePreset: {type: string, enum: [social_post, poster, product_photo, thumbnail]}
+    ImageAspectRatio: {type: string, enum: ["1:1", "4:5", "9:16", "16:9"], default: "1:1"}
+    ImageQuality: {type: string, enum: [standard, high], default: standard}
+    ImageGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt, preset]
+      properties:
+        campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        brand_id: {$ref: "#/components/schemas/ImageNullableUUID", description: Required when campaign_id is null}
+        prompt: {type: string, maxLength: 4000}
+        preset: {$ref: "#/components/schemas/ImagePreset"}
+        reference_file_ids: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/UUID"}}
+        aspect_ratio: {$ref: "#/components/schemas/ImageAspectRatio"}
+        quality: {$ref: "#/components/schemas/ImageQuality"}
+        count: {type: integer, minimum: 1, maximum: 4, default: 1}
+        model_code: {type: [string, "null"]}
+        budget_override: {type: boolean, default: false, description: Lead/Admin only}
+    ImageEstimateLine:
+      type: object
+      required: [item, provider_code, model_code, unit, units, amount]
+      properties:
+        item: {type: string}
+        provider_code: {type: string}
+        model_code: {type: string}
+        unit: {type: string, example: image_1024_standard}
+        units: {type: number}
+        amount: {$ref: "#/components/schemas/Money"}
+    ImageEstimate:
+      type: object
+      required: [total, lines, pricing_version, per_job_limit, campaign_remaining, global_remaining, requires_override, blocked]
+      properties:
+        total: {$ref: "#/components/schemas/Money"}
+        lines: {type: array, items: {$ref: "#/components/schemas/ImageEstimateLine"}}
+        pricing_version: {type: string}
+        per_job_limit: {$ref: "#/components/schemas/Money"}
+        campaign_remaining: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+        global_remaining: {$ref: "#/components/schemas/Money"}
+        requires_override: {type: boolean}
+        blocked: {type: boolean}
+    ImageFile:
+      type: object
+      required: [file_id, role, sort_order, mime_type, width, height, parent_file_id, url, thumbnail_file_id, thumbnail_url, url_expires_at]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        role: {type: string, enum: [primary, variant]}
+        sort_order: {type: integer}
+        mime_type: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        parent_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        url: {type: string, description: Signed GET URL (≤ 15 min)}
+        thumbnail_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        thumbnail_url: {type: string}
+        url_expires_at: {type: string, format: date-time}
+    ImageBatchAsset:
+      type: object
+      required: [id, title, status, version_no, current_version_no, requires_typography_check, images]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        title: {type: string}
+        status: {type: string, enum: [draft, pending_review, changes_requested, approved, archived]}
+        version_no: {type: integer}
+        current_version_no: {type: integer}
+        requires_typography_check: {type: boolean, description: "Poster: submit-review needs checklist.typography_checked (FR-IMG-06)"}
+        images: {type: array, items: {$ref: "#/components/schemas/ImageFile"}}
+    ImageBatchJob:
+      type: object
+      required: [id, status, progress, error_code, error_kind, error_message, cost_estimate, cost_actual]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error_code: {type: [string, "null"]}
+        error_kind: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+        cost_estimate: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+        cost_actual: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+    ImageBatch:
+      type: object
+      required: [id, operation, campaign_id, brand_id, prompt, preset, aspect_ratio, quality, count, model_code, source_file_id, created_by, created_at, job, asset]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        operation: {type: string, enum: [generate, edit, variation]}
+        campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        prompt: {type: string}
+        preset: {$ref: "#/components/schemas/ImagePreset"}
+        aspect_ratio: {type: string}
+        quality: {type: string}
+        count: {type: integer}
+        model_code: {type: string}
+        source_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        created_at: {type: string, format: date-time}
+        job: {$ref: "#/components/schemas/ImageBatchJob"}
+        asset: {oneOf: [{$ref: "#/components/schemas/ImageBatchAsset"}, {type: "null"}]}
+    ImageReference:
+      type: object
+      required: [file_id, source, label, mime_type, width, height, url, thumbnail_url, url_expires_at]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        source: {type: string, enum: [brand, library]}
+        label: {type: string}
+        mime_type: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        url: {type: string}
+        thumbnail_url: {type: string}
+        url_expires_at: {type: string, format: date-time}
     JobStatus:
       type: string
       enum: [queued, running, succeeded, failed, cancelled]
@@ -1135,6 +3083,73 @@ components:
         status: {$ref: "#/components/schemas/JobStatus"}
         result: {type: [object, "null"], additionalProperties: true}
         error: {$ref: "#/components/schemas/JobError"}
+    AIKind: {type: string, enum: [text, image, video, voice]}
+    AIProviderStatus: {type: string, enum: [active, disabled]}
+    AIModelStatus: {type: string, enum: [active, disabled]}
+    PromptTemplateStatus: {type: string, enum: [draft, active, retired]}
+    AICapabilities:
+      type: object
+      additionalProperties: true
+      description: "Model capability map (ports.Capabilities), e.g. aspect_ratios, sizes, max_duration_sec, voices, structured_output"
+    AIProvider:
+      type: object
+      required: [id, code, name, kinds, status, secret_ref, secret_configured, adapter_available, config_json, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        code: {type: string, example: anthropic}
+        name: {type: string}
+        kinds: {type: array, items: {$ref: "#/components/schemas/AIKind"}}
+        status: {$ref: "#/components/schemas/AIProviderStatus"}
+        secret_ref: {type: string}
+        secret_configured: {type: boolean}
+        adapter_available: {type: boolean}
+        config_json: {type: object, additionalProperties: true}
+        updated_at: {type: string, format: date-time}
+    AIModel:
+      type: object
+      required: [id, provider_id, provider_code, provider_status, model_code, kind, capabilities, concurrency_limit, is_default, status, adapter_available, usable]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        provider_id: {$ref: "#/components/schemas/UUID"}
+        provider_code: {type: string}
+        provider_status: {$ref: "#/components/schemas/AIProviderStatus"}
+        model_code: {type: string}
+        kind: {$ref: "#/components/schemas/AIKind"}
+        capabilities: {$ref: "#/components/schemas/AICapabilities"}
+        concurrency_limit: {type: integer}
+        is_default: {type: boolean}
+        status: {$ref: "#/components/schemas/AIModelStatus"}
+        adapter_available: {type: boolean}
+        usable: {type: boolean}
+    AIPriceItem:
+      type: object
+      required: [unit, unit_price]
+      properties:
+        unit: {type: string, example: input_token}
+        unit_price: {type: string, description: "Decimal as string", example: "0.000003"}
+    AIPricingVersion:
+      type: object
+      required: [pricing_version, currency, effective_from, effective_to, is_current, items]
+      properties:
+        pricing_version: {type: string}
+        currency: {type: string}
+        effective_from: {type: string, format: date-time}
+        effective_to: {type: [string, "null"], format: date-time}
+        is_current: {type: boolean}
+        items: {type: array, items: {$ref: "#/components/schemas/AIPriceItem"}}
+    PromptTemplate:
+      type: object
+      required: [id, code, version, status, system_prompt, user_template, output_schema, created_by, created_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        code: {type: string}
+        version: {type: integer}
+        status: {$ref: "#/components/schemas/PromptTemplateStatus"}
+        system_prompt: {type: string}
+        user_template: {type: string}
+        output_schema: {type: [object, "null"], additionalProperties: true}
+        created_by: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        created_at: {type: string, format: date-time}
   responses:
     NoContent:
       description: No content
@@ -1171,3 +3186,49 @@ components:
     ServiceUnavailable:
       description: SERVICE_UNAVAILABLE / PRICING_MISSING
       content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}
+    BrandResponse:
+      description: Brand
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: "#/components/schemas/Brand"}
+              meta: {$ref: "#/components/schemas/Meta"}
+    ProductResponse:
+      description: Product
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: "#/components/schemas/Product"}
+              meta: {$ref: "#/components/schemas/Meta"}
+    CampaignResponse:
+      description: Campaign detail
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data:
+                allOf:
+                  - {$ref: "#/components/schemas/Campaign"}
+                  - type: object
+                    required: [members]
+                    properties:
+                      members: {type: array, items: {$ref: "#/components/schemas/CampaignMember"}}
+              meta: {$ref: "#/components/schemas/Meta"}
+    ImageJobAccepted:
+      description: Job created (or the existing job for a replayed Idempotency-Key)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: "#/components/schemas/JobAccepted"}
+              meta: {$ref: "#/components/schemas/Meta"}
