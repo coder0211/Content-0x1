@@ -1,24 +1,32 @@
-// Package brand wires the brand module.
-//
-// PLACEHOLDER (Agent 1): until the brand module is implemented, Register
-// publishes the in-memory fake from brandtest so dependent modules compile and run.
-// The owning agent replaces the body of Register (keeping its signature).
+// Package brand wires the brand module (ACS-020..023): brand profiles with
+// versions, products with verified facts, brand assets (logo, references,
+// licensed music) and the BrandAPI used for prompt building.
 package brand
 
 import (
+	"github.com/go-chi/chi/v5"
+
 	"github.com/be/acs/api/internal/app/registry"
-	"github.com/be/acs/api/internal/modules/brand/brandtest"
+	brandhttp "github.com/be/acs/api/internal/modules/brand/adapter/http"
+	"github.com/be/acs/api/internal/modules/brand/adapter/postgres"
+	"github.com/be/acs/api/internal/modules/brand/usecase"
 )
 
 // Module is the brand module.
-type Module struct{}
+type Module struct {
+	Svc     *usecase.Service
+	handler *brandhttp.Handler
+}
 
 // Name implements registry.Module.
 func (*Module) Name() string { return "brand" }
 
-// Register publishes APIs.Brands.
+// Routes implements registry.HTTPModule.
+func (m *Module) Routes(r chi.Router) { m.handler.Routes(r) }
+
+// Register builds the module and publishes APIs.Brands.
 func Register(c *registry.Container) (registry.Module, error) {
-	c.Logger.Warn("brand module is a placeholder (in-memory fake)")
-	c.APIs.Brands = brandtest.NewAPI()
-	return &Module{}, nil
+	svc := &usecase.Service{Tx: c.Tx, Repo: postgres.NewRepository(c.DB), Clock: c.Clock, Audit: c.APIs.Audit, Files: c.APIs.Files}
+	c.APIs.Brands = svc
+	return &Module{Svc: svc, handler: &brandhttp.Handler{Svc: svc}}, nil
 }
