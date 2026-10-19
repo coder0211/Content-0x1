@@ -385,6 +385,177 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /images/estimate:
+    post:
+      tags: [images]
+      operationId: estimateImages
+      summary: Price an image request without creating a job (CostChip + over-budget banner)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+                operation: {type: string, enum: [generate, edit, variation], default: generate}
+                aspect_ratio: {$ref: "#/components/schemas/ImageAspectRatio"}
+                quality: {$ref: "#/components/schemas/ImageQuality"}
+                count: {type: integer, minimum: 1, maximum: 4, default: 1}
+                model_code: {type: [string, "null"]}
+      responses:
+        "200":
+          description: Estimate with remaining limits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/ImageEstimate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+  /images/generations:
+    get:
+      tags: [images]
+      operationId: listImageBatches
+      summary: Gallery grouped by request, newest first (own batches; a campaign's batches; or one asset's history)
+      parameters:
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: asset_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "200":
+          description: Batches
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/ImageBatch"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      tags: [images]
+      operationId: generateImages
+      summary: Prompt-to-image / image-to-image job (FR-IMG-01, 02) → 1 image asset with `count` files
+      description: |
+        Validates reference access (other campaign's file without membership → 404), MIME (png/jpeg/webp,
+        else 415) and model capabilities (unsupported option → 422 CAPABILITY_NOT_SUPPORTED with
+        `details: [{"field":"aspect_ratio","supported":[...]}]`; options are never changed silently).
+        Then estimate → job + budget reservation → 202.
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ImageGenerationRequest"}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /images/references:
+    get:
+      tags: [images]
+      operationId: listImageReferences
+      summary: Reference candidates — brand logo/reference images and recent generated images (signed URLs ≤ 15 min)
+      parameters:
+        - {name: campaign_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+        - {name: brand_id, in: query, schema: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "200":
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/ImageReference"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /images/{assetId}/edits:
+    parameters:
+      - {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/UUID"}}
+    post:
+      tags: [images]
+      operationId: editImage
+      summary: Edit one image of the asset by prompt → new version (FR-IMG-04)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, prompt]
+              properties:
+                file_id: {$ref: "#/components/schemas/UUID"}
+                prompt: {type: string, maxLength: 4000}
+                mask_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+                quality: {$ref: "#/components/schemas/ImageQuality"}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /images/{assetId}/variations:
+    parameters:
+      - {name: assetId, in: path, required: true, schema: {$ref: "#/components/schemas/UUID"}}
+    post:
+      tags: [images]
+      operationId: varyImage
+      summary: N variations of one image → new version; files carry parent_file_id (FR-IMG-04)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file_id, count]
+              properties:
+                file_id: {$ref: "#/components/schemas/UUID"}
+                count: {type: integer, minimum: 1, maximum: 4}
+                prompt: {type: string, maxLength: 4000, description: Defaults to the version prompt}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202": {$ref: "#/components/responses/ImageJobAccepted"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
 components:
   securitySchemes:
     cookieAuth:
@@ -563,6 +734,117 @@ components:
         locked_until: {type: [string, "null"], format: date-time}
         last_login_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+    ImageNullableUUID: {type: [string, "null"], format: uuid}
+    ImagePreset: {type: string, enum: [social_post, poster, product_photo, thumbnail]}
+    ImageAspectRatio: {type: string, enum: ["1:1", "4:5", "9:16", "16:9"], default: "1:1"}
+    ImageQuality: {type: string, enum: [standard, high], default: standard}
+    ImageGenerationRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt, preset]
+      properties:
+        campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        brand_id: {$ref: "#/components/schemas/ImageNullableUUID", description: Required when campaign_id is null}
+        prompt: {type: string, maxLength: 4000}
+        preset: {$ref: "#/components/schemas/ImagePreset"}
+        reference_file_ids: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/UUID"}}
+        aspect_ratio: {$ref: "#/components/schemas/ImageAspectRatio"}
+        quality: {$ref: "#/components/schemas/ImageQuality"}
+        count: {type: integer, minimum: 1, maximum: 4, default: 1}
+        model_code: {type: [string, "null"]}
+        budget_override: {type: boolean, default: false, description: Lead/Admin only}
+    ImageEstimateLine:
+      type: object
+      required: [item, provider_code, model_code, unit, units, amount]
+      properties:
+        item: {type: string}
+        provider_code: {type: string}
+        model_code: {type: string}
+        unit: {type: string, example: image_1024_standard}
+        units: {type: number}
+        amount: {$ref: "#/components/schemas/Money"}
+    ImageEstimate:
+      type: object
+      required: [total, lines, pricing_version, per_job_limit, campaign_remaining, global_remaining, requires_override, blocked]
+      properties:
+        total: {$ref: "#/components/schemas/Money"}
+        lines: {type: array, items: {$ref: "#/components/schemas/ImageEstimateLine"}}
+        pricing_version: {type: string}
+        per_job_limit: {$ref: "#/components/schemas/Money"}
+        campaign_remaining: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+        global_remaining: {$ref: "#/components/schemas/Money"}
+        requires_override: {type: boolean}
+        blocked: {type: boolean}
+    ImageFile:
+      type: object
+      required: [file_id, role, sort_order, mime_type, width, height, parent_file_id, url, thumbnail_file_id, thumbnail_url, url_expires_at]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        role: {type: string, enum: [primary, variant]}
+        sort_order: {type: integer}
+        mime_type: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        parent_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        url: {type: string, description: Signed GET URL (≤ 15 min)}
+        thumbnail_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        thumbnail_url: {type: string}
+        url_expires_at: {type: string, format: date-time}
+    ImageBatchAsset:
+      type: object
+      required: [id, title, status, version_no, current_version_no, requires_typography_check, images]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        title: {type: string}
+        status: {type: string, enum: [draft, pending_review, changes_requested, approved, archived]}
+        version_no: {type: integer}
+        current_version_no: {type: integer}
+        requires_typography_check: {type: boolean, description: "Poster: submit-review needs checklist.typography_checked (FR-IMG-06)"}
+        images: {type: array, items: {$ref: "#/components/schemas/ImageFile"}}
+    ImageBatchJob:
+      type: object
+      required: [id, status, progress, error_code, error_kind, error_message, cost_estimate, cost_actual]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        error_code: {type: [string, "null"]}
+        error_kind: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+        cost_estimate: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+        cost_actual: {oneOf: [{$ref: "#/components/schemas/Money"}, {type: "null"}]}
+    ImageBatch:
+      type: object
+      required: [id, operation, campaign_id, brand_id, prompt, preset, aspect_ratio, quality, count, model_code, source_file_id, created_by, created_at, job, asset]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        operation: {type: string, enum: [generate, edit, variation]}
+        campaign_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        prompt: {type: string}
+        preset: {$ref: "#/components/schemas/ImagePreset"}
+        aspect_ratio: {type: string}
+        quality: {type: string}
+        count: {type: integer}
+        model_code: {type: string}
+        source_file_id: {$ref: "#/components/schemas/ImageNullableUUID"}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        created_at: {type: string, format: date-time}
+        job: {$ref: "#/components/schemas/ImageBatchJob"}
+        asset: {oneOf: [{$ref: "#/components/schemas/ImageBatchAsset"}, {type: "null"}]}
+    ImageReference:
+      type: object
+      required: [file_id, source, label, mime_type, width, height, url, thumbnail_url, url_expires_at]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        source: {type: string, enum: [brand, library]}
+        label: {type: string}
+        mime_type: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        url: {type: string}
+        thumbnail_url: {type: string}
+        url_expires_at: {type: string, format: date-time}
   responses:
     NoContent:
       description: No content
@@ -599,3 +881,13 @@ components:
     ServiceUnavailable:
       description: SERVICE_UNAVAILABLE / PRICING_MISSING
       content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}
+    ImageJobAccepted:
+      description: Job created (or the existing job for a replayed Idempotency-Key)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: "#/components/schemas/JobAccepted"}
+              meta: {$ref: "#/components/schemas/Meta"}
