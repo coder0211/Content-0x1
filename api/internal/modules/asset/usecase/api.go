@@ -110,6 +110,10 @@ type AssetView struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	CurrentVersion *VersionView
+	// UsageRights is the FR-AST-06 note (nil when none). Added by Agent 10.
+	UsageRights *string
+	// SubmittedAt is the latest submit-review time. Added by Agent 10.
+	SubmittedAt *time.Time
 }
 
 // API is the asset module's public interface. Methods are safe to call
@@ -129,4 +133,7 @@ type API interface {
 	// CanEdit returns nil when actor may modify the asset (owner, campaign
 	// member, or Lead/Admin), NOT_FOUND/FORBIDDEN otherwise (IDOR guard).
 	CanEdit(ctx context.Context, actor kernel.Actor, assetID kernel.ID) error
+	// CountByStatus counts live assets per status; createdBy nil counts all
+	// assets (dashboard widgets). Added by Agent 10.
+	CountByStatus(ctx context.Context, createdBy *kernel.ID) (map[Status]int, error)
 }

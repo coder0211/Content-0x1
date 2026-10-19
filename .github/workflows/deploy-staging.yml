@@ -1,0 +1,127 @@
+# CD (ACS-106): every push to main builds the four images, pushes them to
+# GHCR and deploys them to the staging VM over SSH (docker compose).
+#
+# Required repository secrets (placeholders — configure in Settings › Secrets):
+#   STAGING_SSH_HOST, STAGING_SSH_USER, STAGING_SSH_KEY (private key),
+#   STAGING_SSH_KNOWN_HOSTS (output of `ssh-keyscan <host>`),
+#   STAGING_GHCR_USER, STAGING_GHCR_TOKEN (read:packages, used by the VM to pull)
+# Repository variables: STAGING_APP_HOST (e.g. acs-staging.example.com)
+# The VM holds /opt/acs/deploy/staging/.env (never in git) and certs/.
+name: deploy-staging
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}/acs
+  IMAGE_TAG: ${{ github.sha }}
+  DEPLOY_DIR: /opt/acs
+
+jobs:
+  build:
+    name: Build & push ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { image: acs-api, dockerfile: deploy/Dockerfile.api }
+          - { image: acs-worker, dockerfile: deploy/Dockerfile.worker }
+          - { image: acs-render, dockerfile: deploy/Dockerfile.render }
+          - { image: acs-web, dockerfile: deploy/Dockerfile.web }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lowercase registry path
+        run: echo "REGISTRY=${REGISTRY,,}" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ matrix.image }}:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ matrix.image }}:staging
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  deploy:
+    name: Deploy to staging
+    needs: build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lowercase registry path
+        run: echo "REGISTRY=${REGISTRY,,}" >> "$GITHUB_ENV"
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Sync deploy files
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+          USER: ${{ secrets.STAGING_SSH_USER }}
+        run: |
+          # Only compose/nginx/observability/backup files; .env and certs stay on the VM.
+          rsync -az --delete --exclude '.env' --exclude 'certs/' -e "ssh -i ~/.ssh/id_deploy" \
+            deploy/ "$USER@$HOST:$DEPLOY_DIR/deploy/"
+      - name: Pull, migrate, restart
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+          USER: ${{ secrets.STAGING_SSH_USER }}
+          GHCR_USER: ${{ secrets.STAGING_GHCR_USER }}
+          GHCR_TOKEN: ${{ secrets.STAGING_GHCR_TOKEN }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "$USER@$HOST" \
+            REGISTRY="$REGISTRY" IMAGE_TAG="$IMAGE_TAG" GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" DEPLOY_DIR="$DEPLOY_DIR" \
+            'bash -s' <<'EOF'
+          set -euo pipefail
+          cd "$DEPLOY_DIR/deploy/staging"
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          # Record the previous tag for rollback, then pin the new one.
+          prev="$(grep '^IMAGE_TAG=' .env | cut -d= -f2- || true)"
+          echo "$prev" > .previous_image_tag
+          sed -i "s|^REGISTRY=.*|REGISTRY=$REGISTRY|; s|^IMAGE_TAG=.*|IMAGE_TAG=$IMAGE_TAG|" .env
+          compose="docker compose --env-file .env"
+          $compose pull api worker render web migrate
+          $compose run --rm migrate
+          $compose up -d --remove-orphans
+          docker image prune -f >/dev/null
+          docker logout ghcr.io
+          EOF
+      - name: Smoke check
+        env:
+          APP_HOST: ${{ vars.STAGING_APP_HOST }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "https://$APP_HOST/healthz" >/dev/null; then echo "healthz ok"; break; fi
+            [ "$i" = 30 ] && { echo "healthz failed"; exit 1; }
+            sleep 5
+          done
+          curl -fsS -o /dev/null "https://$APP_HOST/"
+          # /metrics must NOT be public.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$APP_HOST/metrics")
+          [ "$code" = 404 ] || { echo "/metrics is exposed ($code)"; exit 1; }
+          # Unauthenticated API returns 401 (routing + auth middleware alive).
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://$APP_HOST/api/v1/me")
+          [ "$code" = 401 ] || { echo "/api/v1/me returned $code"; exit 1; }

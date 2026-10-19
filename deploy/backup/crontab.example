@@ -1,0 +1,10 @@
+# /etc/cron.d/acs-backup on the VM (ACS-103). Logs go to syslog via logger;
+# a non-zero exit is visible in `journalctl -t acs-backup`.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Daily pg_dump at 02:15 UTC (staging/prod compose dir).
+15 2 * * * deploy cd /opt/acs/deploy/staging && docker compose --env-file .env --profile backup run --rm backup 2>&1 | logger -t acs-backup
+
+# Daily freshness check: the latest backup must be < 26h old.
+0 9 * * * deploy find /var/backups/acs -name 'acs-*.dump*' -mmin -1560 | grep -q . || echo "ACS backup is stale" | logger -t acs-backup -p user.err

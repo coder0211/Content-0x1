@@ -1,0 +1,346 @@
+# Fragment owned by module asset (ACS-034, 080, 082, 084, 085).
+paths:
+  /assets:
+    get:
+      tags: [asset]
+      operationId: listAssets
+      summary: Library search (brand.view). Full-text `q` (unaccent, prefix) + filters; newest first.
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/AssetType" } }
+        - { name: status, in: query, description: "One status or a comma-separated list", schema: { type: string, example: "draft,pending_review" } }
+        - { name: campaign_id, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+        - { name: brand_id, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+        - { name: created_by, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: from, in: query, description: "created_at >= from (RFC3339 or YYYY-MM-DD)", schema: { type: string } }
+        - { name: to, in: query, description: "created_at < to (RFC3339) or end of day (YYYY-MM-DD)", schema: { type: string } }
+      responses:
+        "200":
+          description: Page of assets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AssetSummary" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /assets/{id}:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [asset]
+      operationId: getAsset
+      summary: Asset detail with current version, provenance and review history (brand.view)
+      responses:
+        "200":
+          description: Asset
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDetail" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [asset]
+      operationId: updateAsset
+      summary: Update title, tags, usage rights (owner, campaign member, Lead/Admin)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetUpdateRequest" } } }
+      responses:
+        "200":
+          description: Updated asset
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDetail" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [asset]
+      operationId: deleteAsset
+      summary: Soft delete (owner, campaign member, Lead/Admin); audited
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "204": { $ref: "#/components/responses/NoContent" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /assets/{id}/versions:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    get:
+      tags: [asset]
+      operationId: listAssetVersions
+      summary: All versions, newest first (brand.view)
+      responses:
+        "200":
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AssetVersion" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [asset]
+      operationId: createAssetVersion
+      summary: Manual revision. `base_version_no` must equal the current version → else 409 VERSION_CONFLICT. An approved / pending / changes-requested asset goes back to draft.
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetVersionCreateRequest" } } }
+      responses:
+        "201":
+          description: New current version
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetVersion" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /assets/{id}/versions/{versionNo}/restore:
+    parameters:
+      - { $ref: "#/components/parameters/PathID" }
+      - { name: versionNo, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      tags: [asset]
+      operationId: restoreAssetVersion
+      summary: Creates version N+1 with the content and files of `versionNo` (owner, campaign member, Lead/Admin)
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      responses:
+        "201":
+          description: New current version
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetVersion" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /assets/{id}/submit-review:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [review]
+      operationId: submitAssetReview
+      summary: "draft → pending_review (owner, campaign member, Lead/Admin). Posters require checklist.typography_checked=true. Notifies reviewers."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetSubmitReviewRequest" } } }
+      responses:
+        "200":
+          description: Asset in pending_review
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDetail" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /assets/{id}/approve:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [review]
+      operationId: approveAsset
+      summary: "pending_review → approved (asset.review). The creator cannot approve their own asset unless Admin → 403 SELF_APPROVAL_NOT_ALLOWED. Notifies the creator."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetReviewDecisionRequest" } } }
+      responses:
+        "200":
+          description: Approved asset
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDetail" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /assets/{id}/request-changes:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [review]
+      operationId: requestAssetChanges
+      summary: "pending_review → changes_requested (asset.review); comment required. Notifies the creator."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetReviewDecisionRequest" } } }
+      responses:
+        "200":
+          description: Asset in changes_requested
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDetail" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /reviews/queue:
+    get:
+      tags: [review]
+      operationId: listReviewQueue
+      summary: Assets in pending_review, oldest submission first (asset.review)
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/AssetType" } }
+        - { name: campaign_id, in: query, schema: { $ref: "#/components/schemas/UUID" } }
+      responses:
+        "200":
+          description: Review queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AssetSummary" } }
+                  meta: { $ref: "#/components/schemas/ListMeta" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /assets/{id}/download-url:
+    parameters: [{ $ref: "#/components/parameters/PathID" }]
+    post:
+      tags: [asset]
+      operationId: createAssetDownloadUrl
+      summary: "Signed download URL (asset.download, TTL ≤ 15 min). Creator/Reviewer: only approved assets (else 403). Lead/Admin: any status and any version's file. Every call is audited (asset.download)."
+      parameters: [{ $ref: "#/components/parameters/CSRFToken" }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/AssetDownloadRequest" } } }
+      responses:
+        "200":
+          description: Signed URL
+          content: { application/json: { schema: { type: object, required: [data, meta], properties: { data: { $ref: "#/components/schemas/AssetDownloadURL" }, meta: { $ref: "#/components/schemas/Meta" } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  schemas:
+    AssetType: { type: string, enum: [content, image, video] }
+    AssetStatus: { type: string, enum: [draft, pending_review, changes_requested, approved, archived] }
+    AssetFileRole: { type: string, enum: [primary, variant, thumbnail, subtitle, audio, preview] }
+    AssetVersionFile:
+      type: object
+      required: [file_id, role, sort_order, mime_type, kind, url]
+      properties:
+        file_id: { $ref: "#/components/schemas/UUID" }
+        role: { $ref: "#/components/schemas/AssetFileRole" }
+        sort_order: { type: integer }
+        mime_type: { type: string }
+        kind: { type: string, enum: [image, video, audio, document, subtitle] }
+        width: { type: [integer, "null"] }
+        height: { type: [integer, "null"] }
+        duration_ms: { type: [integer, "null"] }
+        url: { type: [string, "null"], description: "Inline preview URL (≤ 15 min). Downloads go through /assets/{id}/download-url." }
+    AssetProvenance:
+      type: object
+      required: [job_id, job_type, provider_code, model_code, prompt_template_code, prompt_template_version, brand_version_id, brand_version_no]
+      properties:
+        job_id: { $ref: "#/components/schemas/UUID" }
+        job_type: { type: string }
+        provider_code: { type: [string, "null"] }
+        model_code: { type: [string, "null"] }
+        prompt_template_code: { type: [string, "null"] }
+        prompt_template_version: { type: [integer, "null"] }
+        brand_version_id: { type: [string, "null"], format: uuid }
+        brand_version_no: { type: [integer, "null"] }
+    AssetVersion:
+      type: object
+      required: [id, version_no, content_json, change_note, generated_by_job_id, created_by, created_by_name, created_at, files, provenance]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        version_no: { type: integer }
+        content_json: { type: object, description: "Per-type schema (migration 0006): content {title, hook, body_html, body_text, cta, hashtags[], platform, warnings[]}; image {prompt, preset, aspect_ratio, file_ids[]}; video {prompt, preset, aspect_ratio, script, scene_ids[], final_file_id, subtitle_file_id}" }
+        change_note: { type: [string, "null"] }
+        generated_by_job_id: { type: [string, "null"], format: uuid }
+        created_by: { $ref: "#/components/schemas/UUID" }
+        created_by_name: { type: string }
+        created_at: { type: string, format: date-time }
+        files: { type: array, items: { $ref: "#/components/schemas/AssetVersionFile" } }
+        provenance: { oneOf: [{ $ref: "#/components/schemas/AssetProvenance" }, { type: "null" }] }
+    AssetSummary:
+      type: object
+      required: [id, campaign_id, brand_id, type, subtype, title, status, tags, usage_rights, source_asset_id, created_by, created_by_name, current_version_no, thumbnail_url, submitted_at, created_at, updated_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        campaign_id: { type: [string, "null"], format: uuid }
+        brand_id: { $ref: "#/components/schemas/UUID" }
+        type: { $ref: "#/components/schemas/AssetType" }
+        subtype: { type: [string, "null"], example: facebook_post }
+        title: { type: string }
+        status: { $ref: "#/components/schemas/AssetStatus" }
+        tags: { type: array, items: { type: string } }
+        usage_rights: { type: [string, "null"], description: "Usage-rights note (music source, reference image licence), FR-AST-06" }
+        source_asset_id: { type: [string, "null"], format: uuid }
+        created_by: { $ref: "#/components/schemas/UUID" }
+        created_by_name: { type: string }
+        current_version_no: { type: integer }
+        thumbnail_url: { type: [string, "null"], description: "Inline preview of the current version's thumbnail/primary image (image/video only)" }
+        submitted_at: { type: [string, "null"], format: date-time, description: "Latest submit-review time" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AssetApproval:
+      type: object
+      required: [id, version_id, version_no, reviewer_id, reviewer_name, decision, comment, checklist, created_at]
+      properties:
+        id: { $ref: "#/components/schemas/UUID" }
+        version_id: { $ref: "#/components/schemas/UUID" }
+        version_no: { type: integer }
+        reviewer_id: { $ref: "#/components/schemas/UUID", description: "Actor of the decision (the submitter for `submitted`)" }
+        reviewer_name: { type: string }
+        decision: { type: string, enum: [submitted, approved, changes_requested] }
+        comment: { type: [string, "null"] }
+        checklist: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    AssetDetail:
+      allOf:
+        - { $ref: "#/components/schemas/AssetSummary" }
+        - type: object
+          required: [current_version, approvals, permissions]
+          properties:
+            current_version: { $ref: "#/components/schemas/AssetVersion" }
+            approvals: { type: array, items: { $ref: "#/components/schemas/AssetApproval" }, description: "Review history, newest first" }
+            permissions:
+              type: object
+              description: What the current user may do (FE hides actions; the API still enforces).
+              required: [can_edit, can_submit, can_review, can_download]
+              properties:
+                can_edit: { type: boolean }
+                can_submit: { type: boolean }
+                can_review: { type: boolean }
+                can_download: { type: boolean }
+    AssetUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        tags: { type: array, maxItems: 20, items: { type: string, maxLength: 50 } }
+        usage_rights: { type: [string, "null"], maxLength: 2000 }
+    AssetVersionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [content_json, base_version_no]
+      properties:
+        content_json: { type: object }
+        change_note: { type: string, maxLength: 500 }
+        base_version_no: { type: integer, minimum: 1 }
+    AssetSubmitReviewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 2000 }
+        checklist:
+          type: object
+          additionalProperties: false
+          properties:
+            typography_checked: { type: boolean }
+    AssetReviewDecisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 2000, description: "Required for request-changes" }
+    AssetDownloadRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        file_id: { type: string, format: uuid, description: "Defaults to the current version's primary file" }
+    AssetDownloadURL:
+      type: object
+      required: [url, expires_at, file_id]
+      properties:
+        url: { type: string }
+        expires_at: { type: string, format: date-time }
+        file_id: { $ref: "#/components/schemas/UUID" }

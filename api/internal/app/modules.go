@@ -10,6 +10,7 @@ import (
 	"github.com/be/acs/api/internal/modules/budget"
 	"github.com/be/acs/api/internal/modules/campaign"
 	"github.com/be/acs/api/internal/modules/content"
+	"github.com/be/acs/api/internal/modules/dashboard"
 	"github.com/be/acs/api/internal/modules/file"
 	"github.com/be/acs/api/internal/modules/identity"
 	"github.com/be/acs/api/internal/modules/job"
@@ -32,5 +33,5 @@ var Modules = []registry.Constructor{
 	content.Register,
 	// image.Register,
 	// video.Register,
-	// dashboard.Register,
+	dashboard.Register,
 }
