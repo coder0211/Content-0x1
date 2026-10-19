@@ -94,6 +94,23 @@ type RenderSpec struct {
 	Subtitles    string // path to .srt/.ass; "" for none
 	BurnIn       bool   // burn subtitles into frames instead of a soft track
 	Output       string
+	// ClipDurationsMs are the clip lengths in order; required for
+	// cross-fade transitions (xfade offsets). Empty = hard cuts.
+	ClipDurationsMs []int
+	// VoiceSegments place several voice-over files on the timeline (used
+	// instead of Voice when set); volume comes from Voice when non-nil.
+	VoiceSegments []VoiceSegment
+	// FontsDir is passed to the subtitles filter for burn-in (fonts with
+	// Vietnamese glyphs); "" uses fontconfig defaults.
+	FontsDir string
+}
+
+// VoiceSegment is one voice-over file starting at StartMs on the final
+// timeline, trimmed to MaxMs when > 0.
+type VoiceSegment struct {
+	Path    string
+	StartMs int
+	MaxMs   int
 }
 
 // RenderResult describes the rendered output.

@@ -120,9 +120,9 @@ func parseRate(r string) float64 {
 	return n / d
 }
 
-// Renderer implements ports.VideoRenderer. Normalize, StillToClip and
-// Thumbnail are complete; Render (concat + mix + subtitles) is a baseline
-// that the video module agent (ACS-066) extends.
+// Renderer implements ports.VideoRenderer (ACS-066): normalize, Ken Burns
+// still clips, the final render (cross-fades, voice/music mix with ducking,
+// burn-in or soft subtitles) and thumbnails.
 type Renderer struct {
 	Bin string
 	Run Runner
@@ -147,17 +147,24 @@ var encodeArgs = []string{
 	"-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart",
 }
 
-// NormalizeArgs builds the argument vector for Normalize. A silent stereo
-// track is mixed in and -shortest keeps the clip length when the source has
-// no audio.
+// NormalizeArgs builds the argument vector for Normalize. The output always
+// has exactly one silent stereo AAC track (provider clip audio is dropped:
+// the soundtrack is the voice-over + music mix of the final render), so
+// every normalized clip has identical stream layout for concat/xfade. With
+// DurationMs the clip is padded (last frame cloned) or trimmed to length.
 func NormalizeArgs(s ports.NormalizeSpec) []string {
+	vf := "[0:v]" + scalePad(s.Format)
+	if s.DurationMs > 0 {
+		vf += ",tpad=stop_mode=clone:stop_duration=" + ms(s.DurationMs)
+	}
 	args := []string{"-y", "-hide_banner", "-i", s.Input,
 		"-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-		"-filter_complex", "[0:v]" + scalePad(s.Format) + "[v]",
-		"-map", "[v]", "-map", "0:a?", "-map", "1:a", "-shortest"}
+		"-filter_complex", vf + "[v]",
+		"-map", "[v]", "-map", "1:a", "-shortest"}
 	if s.DurationMs > 0 {
 		args = append(args, "-t", ms(s.DurationMs))
 	}
+	args = append(args, "-r", strconv.Itoa(s.Format.FPS))
 	args = append(args, encodeArgs...)
 	return append(args, s.Output)
 }
@@ -190,58 +197,141 @@ func (r *Renderer) StillToClip(ctx context.Context, s ports.StillClipSpec) error
 	return err
 }
 
-// RenderArgs builds the final render: concat clips (hard cut), optional
-// voice + music (ducked), optional subtitles (burn-in via the subtitles
-// filter referencing a file path, or a soft mov_text track).
+// filterMeta are characters with a meaning in filtergraph syntax; paths
+// containing them are refused instead of escaped (SPEC-02 §5.6).
+const filterMeta = "':,;[]\\=\n\r"
+
+// RenderArgs builds the final render:
+//   - clips joined by cross-fades (xfade + acrossfade) when Transition is
+//     "fade" and ClipDurationsMs is set, else concatenated (hard cut);
+//   - subtitles burned in via the subtitles filter referencing a FILE path
+//     (user text never enters the filtergraph), or muxed as a mov_text track;
+//   - voice-over (one track or timeline segments: atrim + adelay + amix) and
+//     looped music, ducked under the voice with sidechaincompress;
+//   - H.264/AAC 48 kHz, yuv420p, fixed fps, MP4 faststart.
 func RenderArgs(s ports.RenderSpec) ([]string, error) {
 	if len(s.Clips) == 0 {
 		return nil, errors.New("render: no clips")
 	}
-	if s.Subtitles != "" && strings.ContainsAny(s.Subtitles, "':,;[]\\") {
-		return nil, errors.New("render: subtitle path contains filter metacharacters")
-	}
-	args := []string{"-y", "-hide_banner"}
-	for _, c := range s.Clips {
-		args = append(args, "-i", c)
+	for _, p := range []string{s.Subtitles, s.FontsDir} {
+		if p != "" && strings.ContainsAny(p, filterMeta) {
+			return nil, errors.New("render: subtitle path contains filter metacharacters")
+		}
 	}
 	n := len(s.Clips)
-	var fc strings.Builder
-	for i := range n {
-		fmt.Fprintf(&fc, "[%d:v][%d:a]", i, i)
+	fade := s.Transition == "fade" && n > 1 && len(s.ClipDurationsMs) == n && s.TransitionMs > 0
+	if fade {
+		for _, d := range s.ClipDurationsMs {
+			if d <= s.TransitionMs {
+				return nil, errors.New("render: clip shorter than transition")
+			}
+		}
 	}
-	fmt.Fprintf(&fc, "concat=n=%d:v=1:a=1[vcat][acat]", n)
-	video := "[vcat]"
+	args := []string{"-y", "-hide_banner"}
+	input := 0
+	addInput := func(extra ...string) int {
+		args = append(args, extra...)
+		input++
+		return input - 1
+	}
+	for _, c := range s.Clips {
+		addInput("-i", c)
+	}
+	var fc []string
+	video, clipAudio := "[vcat]", "[acat]"
+	switch {
+	case fade:
+		t := ms(s.TransitionMs)
+		prevV, prevA := "[0:v]", "[0:a]"
+		offset := 0
+		for i := 1; i < n; i++ {
+			offset += s.ClipDurationsMs[i-1] - s.TransitionMs
+			v, a := fmt.Sprintf("[xv%d]", i), fmt.Sprintf("[xa%d]", i)
+			fc = append(fc,
+				fmt.Sprintf("%s[%d:v]xfade=transition=fade:duration=%s:offset=%s%s", prevV, i, t, ms(offset), v),
+				fmt.Sprintf("%s[%d:a]acrossfade=d=%s%s", prevA, i, t, a))
+			prevV, prevA = v, a
+		}
+		video, clipAudio = prevV, prevA
+	default:
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "[%d:v][%d:a]", i, i)
+		}
+		fmt.Fprintf(&b, "concat=n=%d:v=1:a=1[vcat][acat]", n)
+		fc = append(fc, b.String())
+	}
 	if s.Subtitles != "" && s.BurnIn {
-		fc.WriteString(";[vcat]subtitles=filename=" + s.Subtitles + "[vsub]")
+		f := "subtitles=filename=" + s.Subtitles
+		if s.FontsDir != "" {
+			f += ":fontsdir=" + s.FontsDir
+		}
+		fc = append(fc, video+f+"[vsub]")
 		video = "[vsub]"
 	}
-	audioInputs := []string{"[acat]"}
-	next := n
-	voiceLabel := ""
-	if s.Voice != nil {
-		args = append(args, "-i", s.Voice.Path)
-		fmt.Fprintf(&fc, ";[%d:a]volume=%.2f[vo0]", next, s.Voice.Volume)
-		voiceLabel = "[vo0]"
-		next++
+	fc = append(fc, fmt.Sprintf("%sformat=yuv420p[vout]", video))
+	video = "[vout]"
+
+	audio := []string{clipAudio}
+	voice := ""
+	voiceVol := 1.0
+	if s.Voice != nil && s.Voice.Volume > 0 {
+		voiceVol = s.Voice.Volume
+	}
+	switch {
+	case len(s.VoiceSegments) > 0:
+		var labels []string
+		for i, seg := range s.VoiceSegments {
+			idx := addInput("-i", seg.Path)
+			chain := fmt.Sprintf("[%d:a]aformat=sample_rates=48000:channel_layouts=stereo", idx)
+			if seg.MaxMs > 0 {
+				chain += ",atrim=0:" + ms(seg.MaxMs)
+			}
+			chain += fmt.Sprintf(",asetpts=PTS-STARTPTS,adelay=%d|%d", max(seg.StartMs, 0), max(seg.StartMs, 0))
+			l := fmt.Sprintf("[vs%d]", i)
+			fc = append(fc, chain+l)
+			labels = append(labels, l)
+		}
+		if len(labels) == 1 {
+			fc = append(fc, fmt.Sprintf("%svolume=%.2f[vo0]", labels[0], voiceVol))
+		} else {
+			fc = append(fc, fmt.Sprintf("%samix=inputs=%d:duration=longest:normalize=0,volume=%.2f[vo0]", strings.Join(labels, ""), len(labels), voiceVol))
+		}
+		voice = "[vo0]"
+	case s.Voice != nil:
+		idx := addInput("-i", s.Voice.Path)
+		fc = append(fc, fmt.Sprintf("[%d:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=%.2f[vo0]", idx, voiceVol))
+		voice = "[vo0]"
 	}
 	if s.Music != nil {
-		args = append(args, "-stream_loop", "-1", "-i", s.Music.Path)
-		fmt.Fprintf(&fc, ";[%d:a]volume=%.2f[mu0]", next, s.Music.Volume)
+		idx := addInput("-stream_loop", "-1", "-i", s.Music.Path)
+		fc = append(fc, fmt.Sprintf("[%d:a]aformat=sample_rates=48000:channel_layouts=stereo,volume=%.2f[mu0]", idx, s.Music.Volume))
 		music := "[mu0]"
-		if s.Music.Duck && voiceLabel != "" {
-			fc.WriteString(";[vo0]asplit=2[vo1][vkey];[mu0][vkey]sidechaincompress=threshold=0.05:ratio=8[mu1]")
-			voiceLabel, music = "[vo1]", "[mu1]"
+		if s.Music.Duck && voice != "" {
+			fc = append(fc, voice+"asplit=2[vo1][vkey]", "[mu0][vkey]sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300[mu1]")
+			voice, music = "[vo1]", "[mu1]"
 		}
-		audioInputs = append(audioInputs, music)
-		next++
+		audio = append(audio, music)
 	}
-	if voiceLabel != "" {
-		audioInputs = append(audioInputs, voiceLabel)
+	if voice != "" {
+		audio = append(audio, voice)
 	}
-	fmt.Fprintf(&fc, ";%samix=inputs=%d:duration=first:normalize=0[aout]", strings.Join(audioInputs, ""), len(audioInputs))
-	args = append(args, "-filter_complex", fc.String(), "-map", video, "-map", "[aout]")
+	if len(audio) == 1 {
+		fc = append(fc, audio[0]+"anull[aout]")
+	} else {
+		// duration=first: the clip track defines the length (music loops).
+		fc = append(fc, fmt.Sprintf("%samix=inputs=%d:duration=first:normalize=0[aout]", strings.Join(audio, ""), len(audio)))
+	}
+	subIdx := -1
 	if s.Subtitles != "" && !s.BurnIn {
-		args = append(args, "-i", s.Subtitles, "-map", fmt.Sprintf("%d:s", next), "-c:s", "mov_text")
+		subIdx = addInput("-i", s.Subtitles)
+	}
+	args = append(args, "-filter_complex", strings.Join(fc, ";"), "-map", video, "-map", "[aout]")
+	if subIdx >= 0 {
+		args = append(args, "-map", fmt.Sprintf("%d:s", subIdx), "-c:s", "mov_text", "-metadata:s:s:0", "language=vie")
+	}
+	if s.Format.FPS > 0 {
+		args = append(args, "-r", strconv.Itoa(s.Format.FPS))
 	}
 	args = append(args, encodeArgs...)
 	return append(args, s.Output), nil
