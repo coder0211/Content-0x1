@@ -1959,6 +1959,244 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+  /videos:
+    get:
+      tags: [videos]
+      operationId: listVideos
+      summary: Video projects visible to the caller (own; all for Lead/Admin/Reviewer), newest first
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {name: campaign_id, in: query, required: false, schema: {$ref: "#/components/schemas/UUID"}}
+      responses:
+        "200":
+          description: Page of projects (signed scene/output URLs omitted; thumbnail only)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: "#/components/schemas/VideoProject"}}
+                  meta: {$ref: "#/components/schemas/ListMeta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [videos]
+      operationId: createVideo
+      summary: Create a video asset + project and start job video_storyboard (script → storyboard)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/VideoCreateRequest"}
+      responses:
+        "202":
+          description: Storyboard job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoJobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "415": {$ref: "#/components/responses/UnsupportedMediaType"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /videos/{id}:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    get:
+      tags: [videos]
+      operationId: getVideo
+      summary: Project with settings, scenes (signed preview URLs ≤ 15 min), latest output and current job
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoProject"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /videos/{id}/scenes:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    put:
+      tags: [videos]
+      operationId: saveVideoScenes
+      summary: Replace the storyboard (add / remove / reorder / edit) within OQ-07 limits
+      description: >-
+        ≤ 10 scenes, 2–8 s each, total ≤ 60 s. Scenes whose picture changes (visual prompt, duration, source image) go back to draft and lose their clip. 409 VIDEO_JOB_IN_PROGRESS while a job runs.
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [scenes]
+              properties:
+                scenes: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/VideoSceneInput"}}
+      responses:
+        "200":
+          description: Saved project
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoProject"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /videos/{id}/estimate:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [videos]
+      operationId: estimateVideo
+      summary: Cost estimate of producing the current storyboard (no job is created)
+      parameters: [{$ref: "#/components/parameters/CSRFToken"}]
+      responses:
+        "200":
+          description: Estimate with breakdown, limits and storyboard violations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoEstimate"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+  /videos/{id}/productions:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [videos]
+      operationId: produceVideo
+      summary: Start job video_production for every scene not ready yet (budget gate; override Lead/Admin only, audited)
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202":
+          description: Production job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoJobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /videos/{id}/scenes/{sceneId}/regenerations:
+    parameters:
+      - {$ref: "#/components/parameters/PathID"}
+      - {name: sceneId, in: path, required: true, schema: {$ref: "#/components/schemas/UUID"}}
+    post:
+      tags: [videos]
+      operationId: regenerateVideoScene
+      summary: Job video_scene_regenerate — regenerate one scene (optional new visual prompt) and re-render, reusing other clips
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                visual_prompt: {type: [string, "null"], maxLength: 1000}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202":
+          description: Regeneration job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoJobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /videos/{id}/renders:
+    parameters: [{$ref: "#/components/parameters/PathID"}]
+    post:
+      tags: [videos]
+      operationId: rerenderVideo
+      summary: Job video_render — render again (e.g. new music/subtitles) without generating scenes
+      parameters:
+        - {$ref: "#/components/parameters/CSRFToken"}
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                voiceover: {$ref: "#/components/schemas/VideoVoiceover"}
+                subtitles: {$ref: "#/components/schemas/VideoSubtitles"}
+                music: {$ref: "#/components/schemas/VideoMusic"}
+                budget_override: {type: boolean, default: false}
+      responses:
+        "202":
+          description: Render job accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: "#/components/schemas/VideoJobAccepted"}
+                  meta: {$ref: "#/components/schemas/Meta"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/Unprocessable"}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
 components:
   securitySchemes:
     cookieAuth:
@@ -3150,6 +3388,205 @@ components:
         output_schema: {type: [object, "null"], additionalProperties: true}
         created_by: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
         created_at: {type: string, format: date-time}
+    VideoPreset:
+      type: string
+      enum: [social_vertical, square, landscape]
+      description: "social_vertical 9:16 1080×1920, square 1:1 1080×1080, landscape 16:9 1920×1080 (30 fps, H.264/AAC)"
+    VideoStage: {type: string, enum: [storyboarding, editing, producing, ready, failed]}
+    VideoSceneStatus: {type: string, enum: [draft, generating, ready, failed]}
+    VideoVoiceover:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        language: {type: string, default: vi}
+        voice_id: {type: [string, "null"]}
+        mode: {type: [string, "null"], enum: [per_scene, whole, null], default: per_scene}
+    VideoSubtitles:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        language: {type: string, default: vi}
+        style: {type: string, enum: [burn_in, soft], default: burn_in}
+    VideoMusic:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        track_brand_asset_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}], description: "Brand music asset with a valid license (422 MUSIC_NOT_LICENSED otherwise)"}
+    VideoCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [preset]
+      properties:
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}], description: Required without campaign_id}
+        title: {type: [string, "null"], maxLength: 200}
+        source:
+          type: object
+          additionalProperties: false
+          properties:
+            type: {type: string, enum: [prompt, image, script]}
+            file_ids: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/UUID"}}
+        prompt: {type: [string, "null"], maxLength: 4000}
+        script_from_asset_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}], description: Content asset whose script seeds the storyboard}
+        preset: {$ref: "#/components/schemas/VideoPreset"}
+        aspect_ratio: {type: [string, "null"], enum: ["9:16", "1:1", "16:9", null]}
+        target_duration_seconds: {type: integer, minimum: 4, maximum: 60, default: 20}
+        resolution: {type: [string, "null"], enum: [1080p, null]}
+        voiceover: {$ref: "#/components/schemas/VideoVoiceover"}
+        subtitles: {$ref: "#/components/schemas/VideoSubtitles"}
+        music: {$ref: "#/components/schemas/VideoMusic"}
+    VideoJobAccepted:
+      allOf:
+        - {$ref: "#/components/schemas/JobAccepted"}
+        - type: object
+          required: [asset_id]
+          properties:
+            asset_id: {$ref: "#/components/schemas/UUID"}
+    VideoSceneInput:
+      type: object
+      additionalProperties: false
+      required: [duration_ms, visual_prompt]
+      properties:
+        id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}], description: "null = new scene"}
+        duration_ms: {type: integer, minimum: 2000, maximum: 8000}
+        visual_prompt: {type: string, maxLength: 1000}
+        narration: {type: [string, "null"], maxLength: 1000}
+        subtitle_text: {type: [string, "null"], maxLength: 1000}
+        source_file_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+    VideoScene:
+      type: object
+      required: [id, sequence_no, duration_ms, visual_prompt, narration, subtitle_text, source_file_id, clip_file_id, status, attempt_count, last_error, preview_url, thumbnail_url]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        sequence_no: {type: integer}
+        duration_ms: {type: integer}
+        visual_prompt: {type: string}
+        narration: {type: [string, "null"]}
+        subtitle_text: {type: [string, "null"]}
+        source_file_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        clip_file_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        status: {$ref: "#/components/schemas/VideoSceneStatus"}
+        attempt_count: {type: integer}
+        last_error: {type: [string, "null"]}
+        preview_url: {type: [string, "null"], description: Signed clip URL (≤ 15 min)}
+        thumbnail_url: {type: [string, "null"]}
+    VideoJobStep:
+      type: object
+      required: [step_key, step_type, status, attempt_count, error_kind, error_message]
+      properties:
+        step_key: {type: string, example: "scene_generation:3"}
+        step_type: {type: string}
+        status: {type: string, enum: [pending, queued, running, waiting_provider, succeeded, failed, cancelled, skipped]}
+        attempt_count: {type: integer}
+        error_kind: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+    VideoJob:
+      type: object
+      required: [id, job_type, status, progress, steps, error_code, error_message]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        job_type: {type: string, enum: [video_storyboard, video_production, video_scene_regenerate, video_render]}
+        status: {type: string, enum: [queued, running, succeeded, failed, cancelled]}
+        progress: {type: integer, minimum: 0, maximum: 100}
+        steps: {type: array, items: {$ref: "#/components/schemas/VideoJobStep"}}
+        error_code: {type: [string, "null"]}
+        error_message: {type: [string, "null"]}
+    VideoOutput:
+      type: object
+      required: [file_id, url, thumbnail_url, duration_ms, version_no, subtitle_file_id, subtitle_url]
+      properties:
+        file_id: {$ref: "#/components/schemas/UUID"}
+        url: {type: string, description: Signed MP4 URL (≤ 15 min); empty in list responses}
+        thumbnail_url: {type: [string, "null"]}
+        duration_ms: {type: integer}
+        version_no: {type: integer}
+        subtitle_file_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        subtitle_url: {type: [string, "null"]}
+    VideoSettings:
+      type: object
+      required: [preset, aspect_ratio, width, height, fps, target_duration_seconds, resolution, voiceover, subtitles, music, source]
+      properties:
+        preset: {$ref: "#/components/schemas/VideoPreset"}
+        aspect_ratio: {type: string}
+        width: {type: integer}
+        height: {type: integer}
+        fps: {type: integer}
+        target_duration_seconds: {type: integer}
+        resolution: {type: string}
+        voiceover: {$ref: "#/components/schemas/VideoVoiceover"}
+        subtitles: {$ref: "#/components/schemas/VideoSubtitles"}
+        music: {$ref: "#/components/schemas/VideoMusic"}
+        source:
+          type: object
+          required: [type, file_ids]
+          properties:
+            type: {type: string, enum: [prompt, image, script]}
+            file_ids: {type: array, items: {$ref: "#/components/schemas/UUID"}}
+    VideoProject:
+      type: object
+      required: [id, title, status, stage, campaign_id, brand_id, created_by, prompt, script, settings, scenes, total_duration_ms, limits, output, current_job, version_no, created_at, updated_at]
+      properties:
+        id: {$ref: "#/components/schemas/UUID"}
+        title: {type: string}
+        status: {type: string, description: content_assets.status}
+        stage: {$ref: "#/components/schemas/VideoStage"}
+        campaign_id: {oneOf: [{$ref: "#/components/schemas/UUID"}, {type: "null"}]}
+        brand_id: {$ref: "#/components/schemas/UUID"}
+        created_by: {$ref: "#/components/schemas/UUID"}
+        prompt: {type: [string, "null"]}
+        script: {type: [string, "null"]}
+        settings: {$ref: "#/components/schemas/VideoSettings"}
+        scenes: {type: array, items: {$ref: "#/components/schemas/VideoScene"}}
+        total_duration_ms: {type: integer}
+        limits:
+          type: object
+          required: [max_total_seconds, max_scenes, min_scene_ms, max_scene_ms]
+          properties:
+            max_total_seconds: {type: integer, example: 60}
+            max_scenes: {type: integer, example: 10}
+            min_scene_ms: {type: integer, example: 2000}
+            max_scene_ms: {type: integer, example: 8000}
+        output: {oneOf: [{$ref: "#/components/schemas/VideoOutput"}, {type: "null"}]}
+        current_job: {oneOf: [{$ref: "#/components/schemas/VideoJob"}, {type: "null"}]}
+        version_no: {type: integer}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    VideoEstimate:
+      type: object
+      required: [scene_count, total_clip_seconds, breakdown, total, limits, requires_override, blocked, violations]
+      properties:
+        scene_count: {type: integer}
+        total_clip_seconds: {type: integer, description: Seconds of clips to generate (ready scenes are reused)}
+        breakdown:
+          type: array
+          items:
+            type: object
+            required: [item, provider, model, units, unit, unit_price, amount]
+            properties:
+              item: {type: string, example: scene_clips}
+              provider: {type: [string, "null"]}
+              model: {type: [string, "null"]}
+              units: {type: number}
+              unit: {type: string, example: video_second_1080p}
+              unit_price: {type: number}
+              amount: {type: number}
+        total: {$ref: "#/components/schemas/Money"}
+        limits:
+          type: object
+          required: [per_job_limit, campaign_remaining, global_remaining]
+          properties:
+            per_job_limit: {type: number}
+            campaign_remaining: {type: [number, "null"]}
+            global_remaining: {type: number}
+        requires_override: {type: boolean, description: Estimate exceeds the per-job limit (Lead/Admin override needed)}
+        blocked: {type: boolean, description: Not enough global/campaign budget left}
+        violations: {type: array, items: {$ref: "#/components/schemas/ErrorDetail"}, description: OQ-07 storyboard issues; production is refused while any exists}
   responses:
     NoContent:
       description: No content
