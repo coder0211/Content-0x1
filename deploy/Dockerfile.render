@@ -1,0 +1,26 @@
+# Render worker image (ACS-066, SPEC-02 §5.6): the worker binary with
+# ffmpeg/ffprobe (libass for ASS burn-in) and Noto fonts that cover
+# Vietnamese diacritics. It consumes the "video" queue (clip download +
+# normalize) and the "render" queue (voice-over/subtitles, concat + xfade,
+# audio mix, burn-in, quality check). FFmpeg only ever receives argument
+# vectors built by platform/ffmpeg (no shell), runs as an unprivileged user
+# and writes to a private temp dir; limit CPU/RAM in compose/orchestrator.
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY api/go.mod api/go.sum ./
+RUN go mod download
+COPY api/ ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+
+FROM alpine:3.22
+RUN apk add --no-cache ffmpeg fontconfig font-noto font-noto-extra ca-certificates tzdata \
+ && fc-cache -f \
+ && addgroup -S acs && adduser -S -G acs -h /home/acs acs \
+ && mkdir -p /var/tmp/acs && chown acs:acs /var/tmp/acs && chmod 700 /var/tmp/acs
+COPY --from=build /out/worker /usr/local/bin/worker
+USER acs
+ENV MEDIA_TEMP_DIR=/var/tmp/acs \
+    FFMPEG_PATH=ffmpeg \
+    VIDEO_FONTS_DIR=/usr/share/fonts/noto \
+    WORKER_QUEUES=video,render
+ENTRYPOINT ["/usr/local/bin/worker"]

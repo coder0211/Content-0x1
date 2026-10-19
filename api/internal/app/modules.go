@@ -16,6 +16,7 @@ import (
 	"github.com/be/acs/api/internal/modules/image"
 	"github.com/be/acs/api/internal/modules/job"
 	"github.com/be/acs/api/internal/modules/provider"
+	"github.com/be/acs/api/internal/modules/video"
 )
 
 // Modules lists every module constructor in dependency order (a module may
@@ -33,6 +34,6 @@ var Modules = []registry.Constructor{
 	asset.Register,
 	content.Register,
 	image.Register,
-	// video.Register,
+	video.Register,
 	dashboard.Register,
 }

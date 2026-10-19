@@ -82,11 +82,33 @@ services:
     build: { context: ., dockerfile: deploy/Dockerfile.worker }
     env_file: [.env.example]
     environment:
+      WORKER_QUEUES: text,image,maintenance
       DATABASE_URL: postgres://acs:acs@postgres:5432/acs?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: minio:9000
       S3_PUBLIC_ENDPOINT: localhost:9000
       SMTP_HOST: mailpit
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+
+  # Video/render queues (ACS-066): ffmpeg + Vietnamese fonts, CPU-bound, so
+  # it runs separately from the text/image worker with its own limits.
+  render-worker:
+    profiles: [app]
+    build: { context: ., dockerfile: deploy/Dockerfile.render }
+    env_file: [.env.example]
+    environment:
+      DATABASE_URL: postgres://acs:acs@postgres:5432/acs?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: minio:9000
+      S3_PUBLIC_ENDPOINT: localhost:9000
+      SMTP_HOST: mailpit
+      WORKER_QUEUES: video,render
+    cpus: 2
+    mem_limit: 2g
+    tmpfs: ["/var/tmp/acs:size=2g"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
